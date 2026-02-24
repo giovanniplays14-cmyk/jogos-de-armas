@@ -1,1 +1,818 @@
-local P=game:GetService("Players")local R=game:GetService("RunService")local U=game:GetService("UserInputService")local W=game:GetService("Workspace")local L=P.LocalPlayer local C=W.CurrentCamera local M=L:GetMouse()local E={Enabled=false,TeamCheck=false,MaxDistance=3000,BoxColor=Color3.fromRGB(255,0,0),TextColor=Color3.fromRGB(255,255,255),TextSize=14}local A={Enabled=false,AlwaysOn=false,ShootToActivate=true,TeamCheck=true,Smoothness=0.95,SnapSmoothness=0.99,FOV=1000,MaxDistance=2000,TargetPart="Head",WallCheck=false,MagnetMode=false,LockTarget=false}local O={}local T=nil local K=nil local F=nil local X=nil local S=false local V=true local D=false local function N(p)if p==L or O[p]then return end local d={Box=Drawing.new("Square"),Name=Drawing.new("Text"),Distance=Drawing.new("Text"),Line=Drawing.new("Line")}for k,v in pairs(d)do v.Visible=false end d.Box.Thickness=2;d.Name.Center=true;d.Name.Outline=true;d.Distance.Center=true;d.Distance.Outline=true;d.Line.Thickness=2;O[p]=d end local function Rm(p)if O[p]then for _,v in pairs(O[p])do v:Remove()end O[p]=nil end end local function Iv(t)if not A.WallCheck then return true end if not L.Character then return false end local r=RaycastParams.new()r.FilterDescendantsInstances={L.Character}r.FilterType=Enum.RaycastFilterType.Blacklist return not W:Raycast(C.CFrame.Position,(t-C.CFrame.Position).Unit*(t-C.CFrame.Position).Magnitude,r)end local function G()if not L.Character then return end local h=L.Character:FindFirstChild("Humanoid")local r=L.Character:FindFirstChild("HumanoidRootPart")if not h or not r or h.Health<=0 then return end local c=Vector2.new(C.ViewportSize.X/2,C.ViewportSize.Y/2)local m=A.FOV if A.LockTarget and K and K.Character then local t=K.Character:FindFirstChild(A.TargetPart)local h=K.Character:FindFirstChild("Humanoid")if t and h and h.Health>0 then local s=C:WorldToViewportPoint(t.Position)if s.Z>0 then return K end end K=nil end for _,p in pairs(P:GetPlayers())do if p~=L and(not A.TeamCheck or p.Team~=L.Team)then local c=p.Character if c then local h=c:FindFirstChild("Humanoid")local t=c:FindFirstChild(A.TargetPart)if h and t and h.Health>0 and(r.Position-t.Position).Magnitude<=A.MaxDistance then local s,o=C:WorldToViewportPoint(t.Position)if o and Iv(t.Position)then local d=(Vector2.new(s.X,s.Y)-c).Magnitude if d<m then m=d T=p end end end end end end if A.LockTarget and T then K=T end return T end local function Ap()L=P.LocalPlayer M=L:GetMouse()C=W.CurrentCamera if not L.Character then return end local h=L.Character:FindFirstChild("Humanoid")if not h or h.Health<=0 then return end local s=A.AlwaysOn or(A.Enabled and(not A.ShootToActivate or S))if not s then T=nil return end T=G()if T and T.Character then local t=T.Character:FindFirstChild(A.TargetPart)if t then local p=t.Position+Vector3.new(0,A.TargetPart=="Head"and 0.2 or 0,0)local d=(C:WorldToViewportPoint(p)-Vector2.new(C.ViewportSize.X/2,C.ViewportSize.Y/2)).Magnitude local m=d<30 and A.SnapSmoothness or d<100 and 0.95 or A.MagnetMode and 0.9 or A.Smoothness C.CFrame=C.CFrame:Lerp(CFrame.new(C.CFrame.Position,p),m)end else K=nil end end local function Up()L=P.LocalPlayer C=W.CurrentCamera if not L.Character then return end local m=L.Character:FindFirstChild("HumanoidRootPart")if not m then return end local c=Vector2.new(C.ViewportSize.X/2,C.ViewportSize.Y/2)if F then F.Visible=A.AlwaysOn or(A.Enabled and(S or not A.ShootToActivate))F.Position=c F.Radius=A.FOV F.Color=T and S and Color3.fromRGB(255,0,0)or T and Color3.fromRGB(255,255,0)or Color3.fromRGB(100,100,100)F.Thickness=T and S and 3 or T and 2 or 1 end for p,d in pairs(O)do if not E.Enabled then for _,v in pairs(d)do v.Visible=false end continue end local c=p.Character if not c then for _,v in pairs(d)do v.Visible=false end continue end local h=c:FindFirstChild("Humanoid")local r=c:FindFirstChild("HumanoidRootPart")if not h or not r or h.Health<=0 or(E.TeamCheck and p.Team==L.Team)then for _,v in pairs(d)do v.Visible=false end continue end local s,o=C:WorldToViewportPoint(r.Position)local d=(m.Position-r.Position).Magnitude if not o or d>E.MaxDistance then for _,v in pairs(d)do v.Visible=false end continue end local z=math.clamp(2000/s.Z,10,200)local w,h=z*0.6,z*1.2 d.Box.Size=Vector2.new(w,h)d.Box.Position=Vector2.new(s.X-w/2,s.Y-h/2)d.Box.Visible=true if p==T then d.Box.Color=S and Color3.fromRGB(255,0,0)or A.MagnetMode and Color3.fromRGB(255,0,255)or Color3.fromRGB(255,255,0)d.Box.Thickness=S and 5 or 3 d.Box.Filled=true d.Box.Transparency=0.3 d.Line.From=c d.Line.To=Vector2.new(s.X,s.Y)d.Line.Visible=true d.Line.Color=S and Color3.fromRGB(255,0,0)or Color3.fromRGB(255,255,0)else d.Box.Color=E.BoxColor d.Box.Thickness=2 d.Box.Filled=false d.Line.Visible=false end d.Name.Text=p.Name..(p==T and(S and" [FIRING]"or" [TARGET]")or"")d.Name.Position=Vector2.new(s.X,s.Y-h/2-15)d.Name.Visible=true d.Name.Color=p==T and(S and Color3.fromRGB(255,0,0)or Color3.fromRGB(255,255,0))or E.TextColor d.Name.Size=p==T and 16 or E.TextSize d.Distance.Text=math.floor(d).."m"d.Distance.Position=Vector2.new(s.X,s.Y+h/2+5)d.Distance.Visible=true end end local G=Instance.new("ScreenGui")G.Name="M"G.Parent=game.CoreGui G.ResetOnSpawn=false local B=Instance.new("Frame")B.Size=UDim2.new(0,260,0,540)B.Position=UDim2.new(0,20,0,20)B.BackgroundColor3=Color3.fromRGB(20,20,20)B.Active=true B.Draggable=true B.Parent=G Instance.new("UICorner",B).CornerRadius=UDim.new(0,8)local Tt=Instance.new("TextLabel")Tt.Size=UDim2.new(1,0,0,35)Tt.BackgroundColor3=Color3.fromRGB(180,0,0)Tt.Text="🔥 AIM ASSIST ULTRA 🔥"Tt.TextColor3=Color3.fromRGB(255,255,255)Tt.TextSize=18 Tt.Font=Enum.Font.GothamBold Tt.Parent=B Instance.new("UICorner",Tt).CornerRadius=UDim.new(0,8)local function Cb(n,y,c,s)local b=Instance.new("TextButton")b.Size=UDim2.new(0.9,0,0,28)b.Position=UDim2.new(0.05,0,0,y)b.BackgroundColor3=c or Color3.fromRGB(70,70,70)b.Text=n b.TextColor3=Color3.fromRGB(255,255,255)b.TextSize=s or 11 b.Font=Enum.Font.GothamBold b.Parent=B Instance.new("UICorner",b).CornerRadius=UDim.new(0,6)return b end local Ea=Cb("ESP",40,Color3.fromRGB(200,50,50))local Aa=Cb("AIM ASSIST",72,Color3.fromRGB(200,50,50),12)local Sa=Cb("ON SHOOT ONLY",104,Color3.fromRGB(0,100,200))local Ma=Cb("MAGNET MODE",136,Color3.fromRGB(150,0,150))local La=Cb("LOCK TARGET",168,Color3.fromRGB(100,100,0))local Tea=Cb("Team Check ESP",200,Color3.fromRGB(70,70,70))local Taa=Cb("Team Check Aim",232,Color3.fromRGB(50,150,50))local Wa=Cb("Wall Check",264,Color3.fromRGB(70,70,70))local Pa=Cb("HIDE PANEL",296,Color3.fromRGB(100,100,100))Pa.Text="HIDE PANEL 👁️"local Sc=Instance.new("Frame")Sc.Size=UDim2.new(0.9,0,0,50)Sc.Position=UDim2.new(0.05,0,0,328)Sc.BackgroundColor3=Color3.fromRGB(30,30,30)Sc.Parent=B Instance.new("UICorner",Sc).CornerRadius=UDim.new(0,6)local Fl=Instance.new("TextLabel")Fl.Size=UDim2.new(1,0,0,20)Fl.Position=UDim2.new(0,0,0,5)Fl.BackgroundTransparency=1 Fl.Text="FOV: 1000"Fl.TextColor3=Color3.fromRGB(255,100,100)Fl.TextSize=12 Fl.Font=Enum.Font.GothamBold Fl.Parent=Sc local Sb=Instance.new("Frame")Sb.Size=UDim2.new(0.9,0,0,8)Sb.Position=UDim2.new(0.05,0,0,28)Sb.BackgroundColor3=Color3.fromRGB(50,50,50)Sb.Parent=Sc Instance.new("UICorner",Sb).CornerRadius=UDim.new(0,4)local Sf=Instance.new("Frame")Sf.Size=UDim2.new(0.5,0,1,0)Sf.BackgroundColor3=Color3.fromRGB(255,0,0)Sf.Parent=Sb Instance.new("UICorner",Sf).CornerRadius=UDim.new(0,4)local Sk=Instance.new("TextButton")Sk.Size=UDim2.new(0,16,0,16)Sk.Position=UDim2.new(0.5,-8,0.5,-8)Sk.BackgroundColor3=Color3.fromRGB(255,255,255)Sk.Parent=Sb Instance.new("UICorner",Sk).CornerRadius=UDim.new(1,0)local Sl=Instance.new("TextLabel")Sl.Size=UDim2.new(0,30,0,15)Sl.Position=UDim2.new(0.05,0,0,38)Sl.BackgroundTransparency=1 Sl.Text="10"Sl.TextColor3=Color3.fromRGB(150,150,150)Sl.TextSize=9 Sl.Parent=Sc local Sh=Instance.new("TextLabel")Sh.Size=UDim2.new(0,30,0,15)Sh.Position=UDim2.new(0.85,0,0,38)Sh.BackgroundTransparency=1 Sh.Text="1500"Sh.TextColor3=Color3.fromRGB(150,150,150)Sh.TextSize=9 Sh.Parent=Sc local St=Instance.new("TextLabel")St.Size=UDim2.new(0.9,0,0,20)St.Position=UDim2.new(0.05,0,0,382)St.BackgroundTransparency=1 St.Text="Status: Esperando tiro..."St.TextColor3=Color3.fromRGB(100,255,100)St.TextSize=10 St.Font=Enum.Font.GothamBold St.Parent=B local Ml=Instance.new("TextLabel")Ml.Size=UDim2.new(0.9,0,0,30)Ml.Position=UDim2.new(0.05,0,0,405)Ml.BackgroundTransparency=1 Ml.Text="MODO: Clique esquerdo para ativar aim"Ml.TextColor3=Color3.fromRGB(0,200,255)Ml.TextSize=10 Ml.Font=Enum.Font.Gotham Ml.TextWrapped=true Ml.Parent=B local Wl=Instance.new("TextLabel")Wl.Size=UDim2.new(0.9,0,0,25)Wl.Position=UDim2.new(0.05,0,0,505)Wl.BackgroundTransparency=1 Wl.Text="⚠️ ULTRA FORTE | Smooth: 0.95"Wl.TextColor3=Color3.fromRGB(255,200,0)Wl.TextSize=10 Wl.Font=Enum.Font.Gotham Wl.Parent=B local function Us(i)local rx=math.clamp((i.Position.X-Sb.AbsolutePosition.X)/Sb.AbsoluteSize.X,0,1)local nv=math.floor(10+(rx*1490))A.FOV=nv Sf.Size=UDim2.new(rx,0,1,0)Sk.Position=UDim2.new(rx,-8,0.5,-8)Fl.Text="FOV: "..nv..(nv>=1400 and" (MAX)"or nv<=20 and" (MIN)"or"")if F then F.Radius=nv end end Sk.InputBegan:Connect(function(i)if i.UserInputType==Enum.UserInputType.MouseButton1 then D=true end end)U.InputChanged:Connect(function(i)if D and i.UserInputType==Enum.UserInputType.MouseMovement then Us(i)end end)U.InputEnded:Connect(function(i)if i.UserInputType==Enum.UserInputType.MouseButton1 then D=false end end)Sb.InputBegan:Connect(function(i)if i.UserInputType==Enum.UserInputType.MouseButton1 then Us(i)end end)Ea.MouseButton1Click:Connect(function()E.Enabled=not E.Enabled Ea.Text="ESP: "..(E.Enabled and"ON"or"OFF")Ea.BackgroundColor3=E.Enabled and Color3.fromRGB(50,200,50)or Color3.fromRGB(200,50,50)end)Aa.MouseButton1Click:Connect(function()A.Enabled=not A.Enabled Aa.Text="AIM ASSIST: "..(A.Enabled and"ON 🔥"or"OFF")Aa.BackgroundColor3=A.Enabled and Color3.fromRGB(255,0,0)or Color3.fromRGB(200,50,50)if A.Enabled then Tt.BackgroundColor3=Color3.fromRGB(255,0,0)wait(0.2)Tt.BackgroundColor3=Color3.fromRGB(180,0,0)end end)Sa.MouseButton1Click:Connect(function()A.ShootToActivate=not A.ShootToActivate Sa.Text=A.ShootToActivate and"ON SHOOT ONLY: ON 🎯"or"ALWAYS ON: ON ⚡"Sa.BackgroundColor3=A.ShootToActivate and Color3.fromRGB(0,200,0)or Color3.fromRGB(255,100,0)Ml.Text=A.ShootToActivate and"MODO: Clique esquerdo para ativar aim"or"MODO: Sempre ativo quando ligado"Ml.TextColor3=A.ShootToActivate and Color3.fromRGB(0,255,100)or Color3.fromRGB(255,200,0)end)Ma.MouseButton1Click:Connect(function()A.MagnetMode=not A.MagnetMode Ma.Text="MAGNET: "..(A.MagnetMode and"ON 🧲"or"OFF")Ma.BackgroundColor3=A.MagnetMode and Color3.fromRGB(255,0,255)or Color3.fromRGB(150,0,150)end)La.MouseButton1Click:Connect(function()A.LockTarget=not A.LockTarget La.Text="LOCK: "..(A.LockTarget and"ON 🔒"or"OFF")La.BackgroundColor3=A.LockTarget and Color3.fromRGB(255,255,0)or Color3.fromRGB(100,100,0)end)Tea.MouseButton1Click:Connect(function()E.TeamCheck=not E.TeamCheck Tea.Text="Team ESP: "..(E.TeamCheck and"ON"or"OFF")Tea.BackgroundColor3=E.TeamCheck and Color3.fromRGB(50,150,50)or Color3.fromRGB(70,70,70)end)Taa.MouseButton1Click:Connect(function()A.TeamCheck=not A.TeamCheck Taa.Text="Team Aim: "..(A.TeamCheck and"ON"or"OFF")Taa.BackgroundColor3=A.TeamCheck and Color3.fromRGB(50,150,50)or Color3.fromRGB(50,150,50)end)Wa.MouseButton1Click:Connect(function()A.WallCheck=not A.WallCheck Wa.Text="Wall Check: "..(A.WallCheck and"ON"or"OFF")Wa.BackgroundColor3=A.WallCheck and Color3.fromRGB(50,150,50)or Color3.fromRGB(70,70,70)end)Pa.MouseButton1Click:Connect(function()V=not V local e={Ea,Aa,Sa,Ma,La,Tea,Taa,Wa,St,Sc,Ml,Wl}for _,v in ipairs(e)do if v and v:IsA("GuiObject")then v.Visible=V end end if V then B.Size=UDim2.new(0,260,0,540)Pa.Position=UDim2.new(0.05,0,0,296)Pa.Text="HIDE PANEL 👁️"Pa.BackgroundColor3=Color3.fromRGB(100,100,100)Tt.Text="🔥 AIM ASSIST ULTRA 🔥"else B.Size=UDim2.new(0,260,0,70)Pa.Position=UDim2.new(0.05,0,0,40)Pa.Text="SHOW PANEL 👁️‍🗨️"Pa.BackgroundColor3=Color3.fromRGB(50,150,50)Tt.Text="🔥 MENU 🔥"end end)F=Drawing.new("Circle")F.Visible=false F.Thickness=2 F.NumSides=64 F.Radius=A.FOV F.Transparency=0.3 F.Color=Color3.fromRGB(255,0,0)if X then X:Disconnect()end X=R.RenderStepped:Connect(function()Ap()Up()St.Text=S and"Status: ATIRANDO - Aim Ativo!"or A.Enabled and A.ShootToActivate and"Status: Esperando tiro..."or A.Enabled and"Status: Sempre Ativo"or"Status: Desativado"St.TextColor3=S and Color3.fromRGB(255,0,0)or A.Enabled and A.ShootToActivate and Color3.fromRGB(100,255,100)or A.Enabled and Color3.fromRGB(255,255,0)or Color3.fromRGB(100,100,100)end)for _,p in pairs(P:GetPlayers())do N(p)end P.PlayerAdded:Connect(function(p)wait(1)N(p)end)P.PlayerRemoving:Connect(Rm)M.Button1Down:Connect(function()S=true end)M.Button1Up:Connect(function()S=false K=nil end)U.InputBegan:Connect(function(i,g)if g then return end if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch or i.KeyCode==Enum.KeyCode.Space or i.KeyCode==Enum.KeyCode.Q then S=true end if i.KeyCode==Enum.KeyCode.Insert then Pa.MouseButton1Click:Fire()end if i.KeyCode==Enum.KeyCode.F then if A.ShootToActivate then S=true else A.Enabled=true Aa.Text="AIM ASSIST: ON 🔥"Aa.BackgroundColor3=Color3.fromRGB(255,0,0)end end end)U.InputEnded:Connect(function(i)if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch or i.KeyCode==Enum.KeyCode.Space or i.KeyCode==Enum.KeyCode.Q then S=false K=nil end if i.KeyCode==Enum.KeyCode.F then if A.ShootToActivate then S=false K=nil else A.Enabled=false Aa.Text="AIM ASSIST: OFF"Aa.BackgroundColor3=Color3.fromRGB(200,50,50)K=nil end end end)spawn(function()while wait(0.05)do if U:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)then if not S then S=true end else if S then S=false K=nil end end end end)L.CharacterAdded:Connect(function()wait(2)for _,p in pairs(P:GetPlayers())do if not O[p]then N(p)end end end)Sa.Text="ON SHOOT ONLY: ON 🎯"Sa.BackgroundColor3=Color3.fromRGB(0,200,0)print("🔥 AIM ASSIST ULTRA - Compacto | FOV: 10-1500")
+-- ESP Script com Aim Assist ULTRA FORTE - ATIVA AO ATIRAR (CORRIGIDO)
+-- Criado para Roblox
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+local ContextActionService = game:GetService("ContextActionService")
+
+-- Variáveis globais
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+local Mouse = LocalPlayer:GetMouse()
+
+-- Configurações
+local ESP = {
+    Enabled = false,
+    TeamCheck = false,
+    MaxDistance = 3000,
+    BoxColor = Color3.fromRGB(255, 0, 0),
+    TextColor = Color3.fromRGB(255, 255, 255),
+    TextSize = 14
+}
+
+-- Configurações do Aim Assist
+local AimAssist = {
+    Enabled = false,
+    AlwaysOn = false,
+    ShootToActivate = true,
+    TeamCheck = true,
+    Smoothness = 0.95,
+    SnapSmoothness = 0.99,
+    FOV = 1000,
+    MaxDistance = 2000,
+    TargetPart = "Head",
+    WallCheck = false,
+    MagnetMode = false,
+    LockTarget = false
+}
+
+-- Variáveis de controle
+local ESPObjects = {}
+local CurrentTarget = nil
+local LockedTarget = nil
+local FOV_Circle = nil
+local Connection = nil
+local IsShooting = false
+local LastClickTime = 0
+local IsPanelVisible = true
+local IsDraggingSlider = false
+
+-- Atualizar referências
+local function UpdateReferences()
+    LocalPlayer = Players.LocalPlayer
+    if LocalPlayer then
+        Mouse = LocalPlayer:GetMouse()
+    end
+    Camera = Workspace.CurrentCamera
+end
+
+-- Criar ESP
+local function CreateESP(player)
+    if player == LocalPlayer then return end
+    if ESPObjects[player] then RemoveESP(player) end
+    
+    local drawings = {}
+    
+    drawings.Box = Drawing.new("Square")
+    drawings.Box.Visible = false
+    drawings.Box.Color = ESP.BoxColor
+    drawings.Box.Thickness = 2
+    drawings.Box.Filled = false
+    drawings.Box.Transparency = 1
+    
+    drawings.Name = Drawing.new("Text")
+    drawings.Name.Visible = false
+    drawings.Name.Color = ESP.TextColor
+    drawings.Name.Size = ESP.TextSize
+    drawings.Name.Center = true
+    drawings.Name.Outline = true
+    drawings.Name.OutlineColor = Color3.fromRGB(0, 0, 0)
+    
+    drawings.Distance = Drawing.new("Text")
+    drawings.Distance.Visible = false
+    drawings.Distance.Color = ESP.TextColor
+    drawings.Distance.Size = ESP.TextSize - 2
+    drawings.Distance.Center = true
+    drawings.Distance.Outline = true
+    drawings.Distance.OutlineColor = Color3.fromRGB(0, 0, 0)
+    
+    drawings.Line = Drawing.new("Line")
+    drawings.Line.Visible = false
+    drawings.Line.Color = Color3.fromRGB(255, 0, 0)
+    drawings.Line.Thickness = 2
+    
+    ESPObjects[player] = drawings
+end
+
+local function RemoveESP(player)
+    if ESPObjects[player] then
+        for _, drawing in pairs(ESPObjects[player]) do
+            if drawing then drawing:Remove() end
+        end
+        ESPObjects[player] = nil
+    end
+end
+
+local function IsVisible(targetPosition)
+    if not AimAssist.WallCheck then return true end
+    if not LocalPlayer.Character then return false end
+    
+    local origin = Camera.CFrame.Position
+    local direction = (targetPosition - origin).Unit * (targetPosition - origin).Magnitude
+    
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterDescendantsInstances = {LocalPlayer.Character}
+    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+    
+    local result = Workspace:Raycast(origin, direction, raycastParams)
+    return result == nil
+end
+
+local function GetClosestPlayer()
+    if not LocalPlayer.Character then return nil end
+    local myHumanoid = LocalPlayer.Character:FindFirstChild("Humanoid")
+    local myRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not myHumanoid or not myRoot or myHumanoid.Health <= 0 then return nil end
+    
+    local closestPlayer = nil
+    local shortestDistance = AimAssist.FOV
+    local centerScreen = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    
+    if AimAssist.LockTarget and LockedTarget and LockedTarget.Character then
+        local targetPart = LockedTarget.Character:FindFirstChild(AimAssist.TargetPart)
+        local humanoid = LockedTarget.Character:FindFirstChild("Humanoid")
+        if targetPart and humanoid and humanoid.Health > 0 then
+            local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+            if onScreen then return LockedTarget end
+        end
+        LockedTarget = nil
+    end
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        if player == LocalPlayer then continue end
+        if AimAssist.TeamCheck and player.Team == LocalPlayer.Team then continue end
+        
+        local character = player.Character
+        if not character then continue end
+        
+        local humanoid = character:FindFirstChild("Humanoid")
+        local targetPart = character:FindFirstChild(AimAssist.TargetPart)
+        
+        if not humanoid or not targetPart or humanoid.Health <= 0 then continue end
+        
+        local distance = (myRoot.Position - targetPart.Position).Magnitude
+        if distance > AimAssist.MaxDistance then continue end
+        
+        local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+        if not onScreen then continue end
+        
+        if not IsVisible(targetPart.Position) then continue end
+        
+        local screenDistance = (Vector2.new(screenPos.X, screenPos.Y) - centerScreen).Magnitude
+        if screenDistance < shortestDistance then
+            shortestDistance = screenDistance
+            closestPlayer = player
+        end
+    end
+    
+    if AimAssist.LockTarget and closestPlayer then
+        LockedTarget = closestPlayer
+    end
+    
+    return closestPlayer
+end
+
+local function ApplyAimAssist()
+    UpdateReferences()
+    
+    local shouldApply = AimAssist.AlwaysOn or (AimAssist.Enabled and (not AimAssist.ShootToActivate or IsShooting))
+    
+    if not shouldApply then 
+        CurrentTarget = nil
+        return 
+    end
+    
+    if not LocalPlayer.Character then return end
+    local myHumanoid = LocalPlayer.Character:FindFirstChild("Humanoid")
+    if not myHumanoid or myHumanoid.Health <= 0 then return end
+    
+    CurrentTarget = GetClosestPlayer()
+    
+    if CurrentTarget and CurrentTarget.Character then
+        local targetPart = CurrentTarget.Character:FindFirstChild(AimAssist.TargetPart)
+        if targetPart then
+            local targetPos = targetPart.Position
+            if AimAssist.TargetPart == "Head" then
+                targetPos = targetPos + Vector3.new(0, 0.2, 0)
+            end
+            
+            local cameraCF = Camera.CFrame
+            local targetCF = CFrame.new(cameraCF.Position, targetPos)
+            
+            local screenPos = Camera:WorldToViewportPoint(targetPos)
+            local centerScreen = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+            local distanceFromCenter = (Vector2.new(screenPos.X, screenPos.Y) - centerScreen).Magnitude
+            
+            local smoothValue
+            if distanceFromCenter < 30 then
+                smoothValue = AimAssist.SnapSmoothness
+            elseif distanceFromCenter < 100 then
+                smoothValue = 0.95
+            elseif AimAssist.MagnetMode then
+                smoothValue = 0.9
+            else
+                smoothValue = AimAssist.Smoothness
+            end
+            
+            Camera.CFrame = cameraCF:Lerp(targetCF, smoothValue)
+        end
+    else
+        LockedTarget = nil
+    end
+end
+
+local function UpdateESP()
+    UpdateReferences()
+    
+    if not LocalPlayer.Character then return end
+    local myRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return end
+    
+    local centerScreen = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    
+    if FOV_Circle then
+        local showCircle = AimAssist.AlwaysOn or (AimAssist.Enabled and (IsShooting or not AimAssist.ShootToActivate))
+        FOV_Circle.Visible = showCircle
+        FOV_Circle.Position = centerScreen
+        FOV_Circle.Radius = AimAssist.FOV
+        
+        if CurrentTarget and IsShooting then
+            FOV_Circle.Color = Color3.fromRGB(255, 0, 0)
+            FOV_Circle.Thickness = 3
+        elseif CurrentTarget then
+            FOV_Circle.Color = Color3.fromRGB(255, 255, 0)
+            FOV_Circle.Thickness = 2
+        else
+            FOV_Circle.Color = Color3.fromRGB(100, 100, 100)
+            FOV_Circle.Thickness = 1
+        end
+    end
+    
+    for player, drawings in pairs(ESPObjects) do
+        if not ESP.Enabled then
+            for _, d in pairs(drawings) do d.Visible = false end
+            continue
+        end
+        
+        local character = player.Character
+        if not character then
+            for _, d in pairs(drawings) do d.Visible = false end
+            continue
+        end
+        
+        local humanoid = character:FindFirstChild("Humanoid")
+        local rootPart = character:FindFirstChild("HumanoidRootPart")
+        
+        if not humanoid or not rootPart or humanoid.Health <= 0 then
+            for _, d in pairs(drawings) do d.Visible = false end
+            continue
+        end
+        
+        if ESP.TeamCheck and player.Team == LocalPlayer.Team then
+            for _, d in pairs(drawings) do d.Visible = false end
+            continue
+        end
+        
+        local rootPosition, onScreen = Camera:WorldToViewportPoint(rootPart.Position)
+        local distance = (myRoot.Position - rootPart.Position).Magnitude
+        
+        if not onScreen or distance > ESP.MaxDistance then
+            for _, d in pairs(drawings) do d.Visible = false end
+            continue
+        end
+        
+        local size = math.clamp(2000 / rootPosition.Z, 10, 200)
+        local width = size * 0.6
+        local height = size * 1.2
+        
+        drawings.Box.Size = Vector2.new(width, height)
+        drawings.Box.Position = Vector2.new(rootPosition.X - width/2, rootPosition.Y - height/2)
+        drawings.Box.Visible = true
+        
+        if player == CurrentTarget then
+            if IsShooting then
+                drawings.Box.Color = Color3.fromRGB(255, 0, 0)
+                drawings.Box.Thickness = 5
+            else
+                drawings.Box.Color = AimAssist.MagnetMode and Color3.fromRGB(255, 0, 255) or Color3.fromRGB(255, 255, 0)
+                drawings.Box.Thickness = 3
+            end
+            drawings.Box.Filled = true
+            drawings.Box.Transparency = 0.3
+            
+            drawings.Line.From = centerScreen
+            drawings.Line.To = Vector2.new(rootPosition.X, rootPosition.Y)
+            drawings.Line.Visible = true
+            drawings.Line.Color = IsShooting and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(255, 255, 0)
+        else
+            drawings.Box.Color = ESP.BoxColor
+            drawings.Box.Thickness = 2
+            drawings.Box.Filled = false
+            drawings.Line.Visible = false
+        end
+        
+        drawings.Name.Text = player.Name .. (player == CurrentTarget and (IsShooting and " [FIRING]" or " [TARGET]") or "")
+        drawings.Name.Position = Vector2.new(rootPosition.X, rootPosition.Y - height/2 - 15)
+        drawings.Name.Visible = true
+        drawings.Name.Color = (player == CurrentTarget) and (IsShooting and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(255, 255, 0)) or ESP.TextColor
+        drawings.Name.Size = (player == CurrentTarget) and 16 or ESP.TextSize
+        
+        drawings.Distance.Text = math.floor(distance) .. "m"
+        drawings.Distance.Position = Vector2.new(rootPosition.X, rootPosition.Y + height/2 + 5)
+        drawings.Distance.Visible = true
+    end
+end
+
+-- Interface
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "ESPMenu"
+ScreenGui.Parent = game.CoreGui
+ScreenGui.ResetOnSpawn = false
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 260, 0, 540) -- Aumentado para caber o slider
+MainFrame.Position = UDim2.new(0, 20, 0, 20)
+MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 8)
+UICorner.Parent = MainFrame
+
+-- Título
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, 0, 0, 35)
+Title.BackgroundColor3 = Color3.fromRGB(180, 0, 0)
+Title.BorderSizePixel = 0
+Title.Text = "🔥 AIM ASSIST ULTRA 🔥"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextSize = 18
+Title.Font = Enum.Font.GothamBold
+Title.Parent = MainFrame
+
+local TitleCorner = Instance.new("UICorner")
+TitleCorner.CornerRadius = UDim.new(0, 8)
+TitleCorner.Parent = Title
+
+-- Função botão
+local function CreateButton(name, posY, color, textSize)
+    local Button = Instance.new("TextButton")
+    Button.Size = UDim2.new(0.9, 0, 0, 28)
+    Button.Position = UDim2.new(0.05, 0, 0, posY)
+    Button.BackgroundColor3 = color or Color3.fromRGB(70, 70, 70)
+    Button.BorderSizePixel = 0
+    Button.Text = name .. ": OFF"
+    Button.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Button.TextSize = textSize or 11
+    Button.Font = Enum.Font.GothamBold
+    Button.Parent = MainFrame
+    
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, 6)
+    Corner.Parent = Button
+    
+    return Button
+end
+
+-- Botões
+local ToggleESP = CreateButton("ESP", 40, Color3.fromRGB(200, 50, 50))
+local ToggleAim = CreateButton("AIM ASSIST", 72, Color3.fromRGB(200, 50, 50), 12)
+local ToggleShootMode = CreateButton("ON SHOOT ONLY", 104, Color3.fromRGB(0, 100, 200))
+local ToggleMagnet = CreateButton("MAGNET MODE", 136, Color3.fromRGB(150, 0, 150))
+local ToggleLock = CreateButton("LOCK TARGET", 168, Color3.fromRGB(100, 100, 0))
+local ToggleTeamESP = CreateButton("Team Check ESP", 200, Color3.fromRGB(70, 70, 70))
+local ToggleTeamAim = CreateButton("Team Check Aim", 232, Color3.fromRGB(50, 150, 50))
+local ToggleWallCheck = CreateButton("Wall Check", 264, Color3.fromRGB(70, 70, 70))
+
+-- Botão para esconder/mostrar painel
+local TogglePanel = CreateButton("HIDE PANEL", 296, Color3.fromRGB(100, 100, 100))
+TogglePanel.Text = "HIDE PANEL 👁️"
+
+-- NOVO: Container do Slider de FOV
+local SliderContainer = Instance.new("Frame")
+SliderContainer.Size = UDim2.new(0.9, 0, 0, 50)
+SliderContainer.Position = UDim2.new(0.05, 0, 0, 328)
+SliderContainer.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+SliderContainer.BorderSizePixel = 0
+SliderContainer.Parent = MainFrame
+
+local SliderCorner = Instance.new("UICorner")
+SliderCorner.CornerRadius = UDim.new(0, 6)
+SliderCorner.Parent = SliderContainer
+
+-- Label do FOV com valor atual
+local FOVLabel = Instance.new("TextLabel")
+FOVLabel.Size = UDim2.new(1, 0, 0, 20)
+FOVLabel.Position = UDim2.new(0, 0, 0, 5)
+FOVLabel.BackgroundTransparency = 1
+FOVLabel.Text = "FOV: 1000"
+FOVLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+FOVLabel.TextSize = 12
+FOVLabel.Font = Enum.Font.GothamBold
+FOVLabel.Parent = SliderContainer
+
+-- Barra de fundo do slider
+local SliderBG = Instance.new("Frame")
+SliderBG.Size = UDim2.new(0.9, 0, 0, 8)
+SliderBG.Position = UDim2.new(0.05, 0, 0, 28)
+SliderBG.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+SliderBG.BorderSizePixel = 0
+SliderBG.Parent = SliderContainer
+
+local SliderBGCorner = Instance.new("UICorner")
+SliderBGCorner.CornerRadius = UDim.new(0, 4)
+SliderBGCorner.Parent = SliderBG
+
+-- Barra de preenchimento (vermelha)
+local SliderFill = Instance.new("Frame")
+SliderFill.Size = UDim2.new(0.5, 0, 1, 0) -- Começa no meio (1000/2000)
+SliderFill.Position = UDim2.new(0, 0, 0, 0)
+SliderFill.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+SliderFill.BorderSizePixel = 0
+SliderFill.Parent = SliderBG
+
+local SliderFillCorner = Instance.new("UICorner")
+SliderFillCorner.CornerRadius = UDim.new(0, 4)
+SliderFillCorner.Parent = SliderFill
+
+-- Botão arrastável do slider
+local SliderKnob = Instance.new("TextButton")
+SliderKnob.Size = UDim2.new(0, 16, 0, 16)
+SliderKnob.Position = UDim2.new(0.5, -8, 0.5, -8)
+SliderKnob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+SliderKnob.BorderSizePixel = 0
+SliderKnob.Text = ""
+SliderKnob.Parent = SliderBG
+
+local SliderKnobCorner = Instance.new("UICorner")
+SliderKnobCorner.CornerRadius = UDim.new(1, 0) -- Círculo
+SliderKnobCorner.Parent = SliderKnob
+
+-- Labels min/max
+local MinLabel = Instance.new("TextLabel")
+MinLabel.Size = UDim2.new(0, 30, 0, 15)
+MinLabel.Position = UDim2.new(0.05, 0, 0, 38)
+MinLabel.BackgroundTransparency = 1
+MinLabel.Text = "10"
+MinLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+MinLabel.TextSize = 9
+MinLabel.Font = Enum.Font.Gotham
+MinLabel.Parent = SliderContainer
+
+local MaxLabel = Instance.new("TextLabel")
+MaxLabel.Size = UDim2.new(0, 30, 0, 15)
+MaxLabel.Position = UDim2.new(0.85, 0, 0, 38)
+MaxLabel.BackgroundTransparency = 1
+MaxLabel.Text = "1500"
+MaxLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+MaxLabel.TextSize = 9
+MaxLabel.Font = Enum.Font.Gotham
+MaxLabel.Parent = SliderContainer
+
+-- Status label (reposicionado)
+local StatusLabel = Instance.new("TextLabel")
+StatusLabel.Size = UDim2.new(0.9, 0, 0, 20)
+StatusLabel.Position = UDim2.new(0.05, 0, 0, 382)
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.Text = "Status: Esperando tiro..."
+StatusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+StatusLabel.TextSize = 10
+StatusLabel.Font = Enum.Font.GothamBold
+StatusLabel.Parent = MainFrame
+
+-- Label modo (reposicionado)
+local ModeLabel = Instance.new("TextLabel")
+ModeLabel.Size = UDim2.new(0.9, 0, 0, 30)
+ModeLabel.Position = UDim2.new(0.05, 0, 0, 405)
+ModeLabel.BackgroundTransparency = 1
+ModeLabel.Text = "MODO: Clique esquerdo para ativar aim"
+ModeLabel.TextColor3 = Color3.fromRGB(0, 200, 255)
+ModeLabel.TextSize = 10
+ModeLabel.Font = Enum.Font.Gotham
+ModeLabel.TextWrapped = true
+ModeLabel.Parent = MainFrame
+
+-- Aviso (reposicionado)
+local WarningLabel = Instance.new("TextLabel")
+WarningLabel.Size = UDim2.new(0.9, 0, 0, 25)
+WarningLabel.Position = UDim2.new(0.05, 0, 0, 505)
+WarningLabel.BackgroundTransparency = 1
+WarningLabel.Text = "⚠️ ULTRA FORTE | Smooth: 0.95"
+WarningLabel.TextColor3 = Color3.fromRGB(255, 200, 0)
+WarningLabel.TextSize = 10
+WarningLabel.Font = Enum.Font.Gotham
+WarningLabel.Parent = MainFrame
+
+-- Função para atualizar o slider
+local function UpdateSlider(input)
+    local sliderBG = SliderBG
+    local relativeX = math.clamp((input.Position.X - sliderBG.AbsolutePosition.X) / sliderBG.AbsoluteSize.X, 0, 1)
+    
+    -- Mapear 0-1 para 10-1500
+    local minFOV = 10
+    local maxFOV = 1500
+    local newFOV = math.floor(minFOV + (relativeX * (maxFOV - minFOV)))
+    
+    -- Atualizar valor
+    AimAssist.FOV = newFOV
+    
+    -- Atualizar visual
+    SliderFill.Size = UDim2.new(relativeX, 0, 1, 0)
+    SliderKnob.Position = UDim2.new(relativeX, -8, 0.5, -8)
+    FOVLabel.Text = "FOV: " .. tostring(newFOV) .. (newFOV >= 1400 and " (MAX)" or newFOV <= 20 and " (MIN)" or "")
+    
+    -- Atualizar círculo de FOV se existir
+    if FOV_Circle then
+        FOV_Circle.Radius = newFOV
+    end
+end
+
+-- Eventos do slider
+SliderKnob.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        IsDraggingSlider = true
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if IsDraggingSlider and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        UpdateSlider(input)
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        IsDraggingSlider = false
+    end
+end)
+
+-- Clique na barra para pular direto
+SliderBG.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        UpdateSlider(input)
+    end
+end)
+
+-- Funções botões
+ToggleESP.MouseButton1Click:Connect(function()
+    ESP.Enabled = not ESP.Enabled
+    ToggleESP.Text = "ESP: " .. (ESP.Enabled and "ON" or "OFF")
+    ToggleESP.BackgroundColor3 = ESP.Enabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(200, 50, 50)
+end)
+
+ToggleAim.MouseButton1Click:Connect(function()
+    AimAssist.Enabled = not AimAssist.Enabled
+    ToggleAim.Text = "AIM ASSIST: " .. (AimAssist.Enabled and "ON 🔥" or "OFF")
+    ToggleAim.BackgroundColor3 = AimAssist.Enabled and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(200, 50, 50)
+    
+    if AimAssist.Enabled then
+        Title.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+        wait(0.2)
+        Title.BackgroundColor3 = Color3.fromRGB(180, 0, 0)
+    end
+end)
+
+ToggleShootMode.MouseButton1Click:Connect(function()
+    AimAssist.ShootToActivate = not AimAssist.ShootToActivate
+    if AimAssist.ShootToActivate then
+        ToggleShootMode.Text = "ON SHOOT ONLY: ON 🎯"
+        ToggleShootMode.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
+        ModeLabel.Text = "MODO: Clique esquerdo para ativar aim"
+        ModeLabel.TextColor3 = Color3.fromRGB(0, 255, 100)
+    else
+        ToggleShootMode.Text = "ALWAYS ON: ON ⚡"
+        ToggleShootMode.BackgroundColor3 = Color3.fromRGB(255, 100, 0)
+        ModeLabel.Text = "MODO: Sempre ativo quando ligado"
+        ModeLabel.TextColor3 = Color3.fromRGB(255, 200, 0)
+    end
+end)
+
+ToggleMagnet.MouseButton1Click:Connect(function()
+    AimAssist.MagnetMode = not AimAssist.MagnetMode
+    ToggleMagnet.Text = "MAGNET: " .. (AimAssist.MagnetMode and "ON 🧲" or "OFF")
+    ToggleMagnet.BackgroundColor3 = AimAssist.MagnetMode and Color3.fromRGB(255, 0, 255) or Color3.fromRGB(150, 0, 150)
+end)
+
+ToggleLock.MouseButton1Click:Connect(function()
+    AimAssist.LockTarget = not AimAssist.LockTarget
+    ToggleLock.Text = "LOCK: " .. (AimAssist.LockTarget and "ON 🔒" or "OFF")
+    ToggleLock.BackgroundColor3 = AimAssist.LockTarget and Color3.fromRGB(255, 255, 0) or Color3.fromRGB(100, 100, 0)
+end)
+
+ToggleTeamESP.MouseButton1Click:Connect(function()
+    ESP.TeamCheck = not ESP.TeamCheck
+    ToggleTeamESP.Text = "Team ESP: " .. (ESP.TeamCheck and "ON" or "OFF")
+    ToggleTeamESP.BackgroundColor3 = ESP.TeamCheck and Color3.fromRGB(50, 150, 50) or Color3.fromRGB(70, 70, 70)
+end)
+
+ToggleTeamAim.MouseButton1Click:Connect(function()
+    AimAssist.TeamCheck = not AimAssist.TeamCheck
+    ToggleTeamAim.Text = "Team Aim: " .. (AimAssist.TeamCheck and "ON" or "OFF")
+    ToggleTeamAim.BackgroundColor3 = AimAssist.TeamCheck and Color3.fromRGB(50, 150, 50) or Color3.fromRGB(50, 150, 50)
+end)
+
+ToggleWallCheck.MouseButton1Click:Connect(function()
+    AimAssist.WallCheck = not AimAssist.WallCheck
+    ToggleWallCheck.Text = "Wall Check: " .. (AimAssist.WallCheck and "ON" or "OFF")
+    ToggleWallCheck.BackgroundColor3 = AimAssist.WallCheck and Color3.fromRGB(50, 150, 50) or Color3.fromRGB(70, 70, 70)
+end)
+
+-- Função do botão esconder/mostrar painel
+TogglePanel.MouseButton1Click:Connect(function()
+    IsPanelVisible = not IsPanelVisible
+    
+    local elementsToToggle = {
+        ToggleESP, ToggleAim, ToggleShootMode, ToggleMagnet, 
+        ToggleLock, ToggleTeamESP, ToggleTeamAim, ToggleWallCheck,
+        StatusLabel, SliderContainer, ModeLabel, WarningLabel
+    }
+    
+    for _, element in ipairs(elementsToToggle) do
+        if element and element:IsA("GuiObject") then
+            element.Visible = IsPanelVisible
+        end
+    end
+    
+    if IsPanelVisible then
+        MainFrame.Size = UDim2.new(0, 260, 0, 540)
+        TogglePanel.Position = UDim2.new(0.05, 0, 0, 296)
+        TogglePanel.Text = "HIDE PANEL 👁️"
+        TogglePanel.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+        Title.Text = "🔥 AIM ASSIST ULTRA 🔥"
+    else
+        MainFrame.Size = UDim2.new(0, 260, 0, 70)
+        TogglePanel.Position = UDim2.new(0.05, 0, 0, 40)
+        TogglePanel.Text = "SHOW PANEL 👁️‍🗨️"
+        TogglePanel.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
+        Title.Text = "🔥 MENU 🔥"
+    end
+end)
+
+-- FOV Circle
+FOV_Circle = Drawing.new("Circle")
+FOV_Circle.Visible = false
+FOV_Circle.Thickness = 2
+FOV_Circle.NumSides = 64
+FOV_Circle.Radius = AimAssist.FOV
+FOV_Circle.Filled = false
+FOV_Circle.Transparency = 0.3
+FOV_Circle.Color = Color3.fromRGB(255, 0, 0)
+
+-- Loop principal
+if Connection then Connection:Disconnect() end
+Connection = RunService.RenderStepped:Connect(function()
+    ApplyAimAssist()
+    UpdateESP()
+    
+    if IsShooting then
+        StatusLabel.Text = "Status: ATIRANDO - Aim Ativo!"
+        StatusLabel.TextColor3 = Color3.fromRGB(255, 0, 0)
+    elseif AimAssist.Enabled and AimAssist.ShootToActivate then
+        StatusLabel.Text = "Status: Esperando tiro..."
+        StatusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+    elseif AimAssist.Enabled then
+        StatusLabel.Text = "Status: Sempre Ativo"
+        StatusLabel.TextColor3 = Color3.fromRGB(255, 255, 0)
+    else
+        StatusLabel.Text = "Status: Desativado"
+        StatusLabel.TextColor3 = Color3.fromRGB(100, 100, 100)
+    end
+end)
+
+-- Criar ESP para jogadores existentes
+for _, player in pairs(Players:GetPlayers()) do
+    CreateESP(player)
+end
+
+Players.PlayerAdded:Connect(function(player)
+    wait(1)
+    CreateESP(player)
+end)
+
+Players.PlayerRemoving:Connect(RemoveESP)
+
+-- Sistema de detecção de tiro
+Mouse.Button1Down:Connect(function()
+    IsShooting = true
+    LastClickTime = tick()
+end)
+
+Mouse.Button1Up:Connect(function()
+    IsShooting = false
+    LockedTarget = nil
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        IsShooting = true
+        LastClickTime = tick()
+    end
+    
+    if input.UserInputType == Enum.UserInputType.Touch then
+        IsShooting = true
+        LastClickTime = tick()
+    end
+    
+    if input.KeyCode == Enum.KeyCode.Space or input.KeyCode == Enum.KeyCode.Q then
+        IsShooting = true
+        LastClickTime = tick()
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input, gameProcessed)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        IsShooting = false
+        LockedTarget = nil
+    end
+    
+    if input.UserInputType == Enum.UserInputType.Touch then
+        IsShooting = false
+        LockedTarget = nil
+    end
+    
+    if input.KeyCode == Enum.KeyCode.Space or input.KeyCode == Enum.KeyCode.Q then
+        IsShooting = false
+        LockedTarget = nil
+    end
+end)
+
+spawn(function()
+    while wait(0.05) do
+        if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+            if not IsShooting then
+                IsShooting = true
+            end
+        else
+            if IsShooting then
+                IsShooting = false
+                LockedTarget = nil
+            end
+        end
+        
+        if IsShooting and (tick() - LastClickTime) > 3 then
+            IsShooting = false
+            LockedTarget = nil
+        end
+    end
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.Insert then
+        TogglePanel.MouseButton1Click:Fire()
+    end
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.F then
+        if AimAssist.ShootToActivate then
+            IsShooting = true
+        else
+            ToggleAim.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+            AimAssist.Enabled = true
+            ToggleAim.Text = "AIM ASSIST: ON 🔥"
+        end
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.F then
+        if AimAssist.ShootToActivate then
+            IsShooting = false
+            LockedTarget = nil
+        else
+            ToggleAim.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+            AimAssist.Enabled = false
+            ToggleAim.Text = "AIM ASSIST: OFF"
+            LockedTarget = nil
+        end
+    end
+end)
+
+LocalPlayer.CharacterAdded:Connect(function()
+    wait(2)
+    UpdateReferences()
+    for _, player in pairs(Players:GetPlayers()) do
+        if not ESPObjects[player] then
+            CreateESP(player)
+        end
+    end
+end)
+
+-- Inicializar
+ToggleShootMode.Text = "ON SHOOT ONLY: ON 🎯"
+ToggleShootMode.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
+
+print("=== 🔥 AIM ASSIST ULTRA - ATIVA AO ATIRAR 🔥 ===")
+print("FORÇA: 95% (0.95 smoothness)")
+print("DETECÇÃO: Multi-método (Mouse, InputService, Check contínuo)")
+print("MODO: Ativa ao clicar com mouse esquerdo!")
+print("SLIDER FOV: 10 a 1500 (arraste para ajustar)")
