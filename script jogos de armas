@@ -1,5 +1,6 @@
 -- ESP Script com Aim Assist ULTRA FORTE - ATIVA AO ATIRAR (CORRIGIDO)
 -- Criado para Roblox
+-- 🎯 NOVO: Prioriza oponente mais próximo por distância 3D, não por FOV
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -34,7 +35,10 @@ local AimAssist = {
     TargetPart = "Head",
     WallCheck = false,
     MagnetMode = false,
-    LockTarget = false
+    LockTarget = false,
+    -- 🎯 NOVO: Sistema de prioridade
+    PriorityMode = "Distance", -- "Distance" (mais próximo) ou "FOV" (mais central)
+    MaxFOVForDistance = 800    -- Se usar modo Distance, só considera jogadores dentro deste FOV
 }
 
 -- Variáveis de controle
@@ -123,14 +127,81 @@ local function IsVisible(targetPosition)
     return result == nil
 end
 
-local function GetClosestPlayer()
+-- 🎯 NOVA FUNÇÃO: Pega o jogador mais próximo por DISTÂNCIA 3D (não por FOV)
+local function GetClosestPlayerByDistance()
     if not LocalPlayer.Character then return nil end
     local myHumanoid = LocalPlayer.Character:FindFirstChild("Humanoid")
     local myRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not myHumanoid or not myRoot or myHumanoid.Health <= 0 then return nil end
     
     local closestPlayer = nil
-    local shortestDistance = AimAssist.FOV
+    local shortestDistance = AimAssist.MaxDistance -- Usa MaxDistance como limite
+    local centerScreen = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    
+    -- Se tem target travado e LockTarget está ativo, mantém ele
+    if AimAssist.LockTarget and LockedTarget and LockedTarget.Character then
+        local targetPart = LockedTarget.Character:FindFirstChild(AimAssist.TargetPart)
+        local humanoid = LockedTarget.Character:FindFirstChild("Humanoid")
+        if targetPart and humanoid and humanoid.Health > 0 then
+            local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+            if onScreen then return LockedTarget end
+        end
+        LockedTarget = nil
+    end
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        if player == LocalPlayer then continue end
+        if AimAssist.TeamCheck and player.Team == LocalPlayer.Team then continue end
+        
+        local character = player.Character
+        if not character then continue end
+        
+        local humanoid = character:FindFirstChild("Humanoid")
+        local targetPart = character:FindFirstChild(AimAssist.TargetPart)
+        
+        if not humanoid or not targetPart or humanoid.Health <= 0 then continue end
+        
+        -- 🎯 CALCULA DISTÂNCIA 3D REAL (do seu personagem até o alvo)
+        local distance3D = (myRoot.Position - targetPart.Position).Magnitude
+        
+        -- Só considera se estiver dentro da distância máxima
+        if distance3D > AimAssist.MaxDistance then continue end
+        
+        -- Verifica se está na tela
+        local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+        if not onScreen then continue end
+        
+        -- 🎯 VERIFICAÇÃO DE FOV: Só considera se estiver dentro do campo de visão configurado
+        -- Isso evita que vire 180 graus para pegar alguém atrás
+        local screenDistance = (Vector2.new(screenPos.X, screenPos.Y) - centerScreen).Magnitude
+        if screenDistance > AimAssist.MaxFOVForDistance then continue end
+        
+        -- Wall check
+        if not IsVisible(targetPart.Position) then continue end
+        
+        -- 🎯 PRIORIZA O MAIS PRÓXIMO (menor distância 3D)
+        if distance3D < shortestDistance then
+            shortestDistance = distance3D
+            closestPlayer = player
+        end
+    end
+    
+    if AimAssist.LockTarget and closestPlayer then
+        LockedTarget = closestPlayer
+    end
+    
+    return closestPlayer
+end
+
+-- 🎯 FUNÇÃO ANTIGA (mantida para compatibilidade/modo alternativo): Pega o mais próximo do centro da tela (FOV)
+local function GetClosestPlayerByFOV()
+    if not LocalPlayer.Character then return nil end
+    local myHumanoid = LocalPlayer.Character:FindFirstChild("Humanoid")
+    local myRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not myHumanoid or not myRoot or myHumanoid.Health <= 0 then return nil end
+    
+    local closestPlayer = nil
+    local shortestScreenDistance = AimAssist.FOV
     local centerScreen = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     
     if AimAssist.LockTarget and LockedTarget and LockedTarget.Character then
@@ -155,8 +226,8 @@ local function GetClosestPlayer()
         
         if not humanoid or not targetPart or humanoid.Health <= 0 then continue end
         
-        local distance = (myRoot.Position - targetPart.Position).Magnitude
-        if distance > AimAssist.MaxDistance then continue end
+        local distance3D = (myRoot.Position - targetPart.Position).Magnitude
+        if distance3D > AimAssist.MaxDistance then continue end
         
         local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
         if not onScreen then continue end
@@ -164,8 +235,8 @@ local function GetClosestPlayer()
         if not IsVisible(targetPart.Position) then continue end
         
         local screenDistance = (Vector2.new(screenPos.X, screenPos.Y) - centerScreen).Magnitude
-        if screenDistance < shortestDistance then
-            shortestDistance = screenDistance
+        if screenDistance < shortestScreenDistance then
+            shortestScreenDistance = screenDistance
             closestPlayer = player
         end
     end
@@ -175,6 +246,15 @@ local function GetClosestPlayer()
     end
     
     return closestPlayer
+end
+
+-- 🎯 FUNÇÃO UNIFICADA: Escolhe qual método usar baseado na configuração
+local function GetClosestPlayer()
+    if AimAssist.PriorityMode == "Distance" then
+        return GetClosestPlayerByDistance()
+    else
+        return GetClosestPlayerByFOV()
+    end
 end
 
 local function ApplyAimAssist()
@@ -239,17 +319,25 @@ local function UpdateESP()
         local showCircle = AimAssist.AlwaysOn or (AimAssist.Enabled and (IsShooting or not AimAssist.ShootToActivate))
         FOV_Circle.Visible = showCircle
         FOV_Circle.Position = centerScreen
-        FOV_Circle.Radius = AimAssist.FOV
+        
+        -- 🎯 Mostra o raio apropriado baseado no modo
+        if AimAssist.PriorityMode == "Distance" then
+            FOV_Circle.Radius = AimAssist.MaxFOVForDistance
+            FOV_Circle.Color = Color3.fromRGB(0, 255, 255) -- Ciano para modo distância
+        else
+            FOV_Circle.Radius = AimAssist.FOV
+            FOV_Circle.Color = Color3.fromRGB(255, 0, 0) -- Vermelho para modo FOV
+        end
         
         if CurrentTarget and IsShooting then
-            FOV_Circle.Color = Color3.fromRGB(255, 0, 0)
             FOV_Circle.Thickness = 3
+            FOV_Circle.Color = Color3.fromRGB(255, 0, 0)
         elseif CurrentTarget then
-            FOV_Circle.Color = Color3.fromRGB(255, 255, 0)
             FOV_Circle.Thickness = 2
+            FOV_Circle.Color = Color3.fromRGB(255, 255, 0)
         else
-            FOV_Circle.Color = Color3.fromRGB(100, 100, 100)
             FOV_Circle.Thickness = 1
+            FOV_Circle.Color = Color3.fromRGB(100, 100, 100)
         end
     end
     
@@ -335,7 +423,7 @@ ScreenGui.Parent = game.CoreGui
 ScreenGui.ResetOnSpawn = false
 
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 260, 0, 540)
+MainFrame.Size = UDim2.new(0, 260, 0, 580) -- Aumentado para caber novo botão
 MainFrame.Position = UDim2.new(0, 20, 0, 20)
 MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 MainFrame.BorderSizePixel = 0
@@ -392,14 +480,17 @@ local ToggleTeamESP = CreateButton("Team Check ESP", 200, Color3.fromRGB(70, 70,
 local ToggleTeamAim = CreateButton("Team Check Aim", 232, Color3.fromRGB(50, 150, 50))
 local ToggleWallCheck = CreateButton("Wall Check", 264, Color3.fromRGB(70, 70, 70))
 
+-- 🎯 NOVO BOTÃO: Toggle entre modo Distância e FOV
+local TogglePriority = CreateButton("PRIORITY: DISTANCE", 296, Color3.fromRGB(0, 150, 255), 11)
+
 -- Botão para esconder/mostrar painel
-local TogglePanel = CreateButton("HIDE PANEL", 296, Color3.fromRGB(100, 100, 100))
+local TogglePanel = CreateButton("HIDE PANEL", 328, Color3.fromRGB(100, 100, 100))
 TogglePanel.Text = "HIDE PANEL 👁️"
 
 -- Container do Slider de FOV
 local SliderContainer = Instance.new("Frame")
 SliderContainer.Size = UDim2.new(0.9, 0, 0, 50)
-SliderContainer.Position = UDim2.new(0.05, 0, 0, 328)
+SliderContainer.Position = UDim2.new(0.05, 0, 0, 360)
 SliderContainer.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 SliderContainer.BorderSizePixel = 0
 SliderContainer.Parent = MainFrame
@@ -479,7 +570,7 @@ MaxLabel.Parent = SliderContainer
 -- Status label
 local StatusLabel = Instance.new("TextLabel")
 StatusLabel.Size = UDim2.new(0.9, 0, 0, 20)
-StatusLabel.Position = UDim2.new(0.05, 0, 0, 382)
+StatusLabel.Position = UDim2.new(0.05, 0, 0, 414)
 StatusLabel.BackgroundTransparency = 1
 StatusLabel.Text = "Status: Esperando tiro..."
 StatusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
@@ -490,7 +581,7 @@ StatusLabel.Parent = MainFrame
 -- Label modo
 local ModeLabel = Instance.new("TextLabel")
 ModeLabel.Size = UDim2.new(0.9, 0, 0, 30)
-ModeLabel.Position = UDim2.new(0.05, 0, 0, 405)
+ModeLabel.Position = UDim2.new(0.05, 0, 0, 437)
 ModeLabel.BackgroundTransparency = 1
 ModeLabel.Text = "MODO: Clique esquerdo para ativar aim"
 ModeLabel.TextColor3 = Color3.fromRGB(0, 200, 255)
@@ -499,10 +590,21 @@ ModeLabel.Font = Enum.Font.Gotham
 ModeLabel.TextWrapped = true
 ModeLabel.Parent = MainFrame
 
+-- 🎯 NOVO LABEL: Mostra o modo de prioridade atual
+local PriorityLabel = Instance.new("TextLabel")
+PriorityLabel.Size = UDim2.new(0.9, 0, 0, 20)
+PriorityLabel.Position = UDim2.new(0.05, 0, 0, 467)
+PriorityLabel.BackgroundTransparency = 1
+PriorityLabel.Text = "🎯 Alvo: Mais próximo (3D)"
+PriorityLabel.TextColor3 = Color3.fromRGB(0, 255, 255)
+PriorityLabel.TextSize = 10
+PriorityLabel.Font = Enum.Font.GothamBold
+PriorityLabel.Parent = MainFrame
+
 -- Aviso
 local WarningLabel = Instance.new("TextLabel")
 WarningLabel.Size = UDim2.new(0.9, 0, 0, 25)
-WarningLabel.Position = UDim2.new(0.05, 0, 0, 505)
+WarningLabel.Position = UDim2.new(0.05, 0, 0, 545)
 WarningLabel.BackgroundTransparency = 1
 WarningLabel.Text = "⚠️ ULTRA FORTE | Smooth: 0.95"
 WarningLabel.TextColor3 = Color3.fromRGB(255, 200, 0)
@@ -514,11 +616,26 @@ WarningLabel.Parent = MainFrame
 local function UpdateSlider(input)
     local relativeX = math.clamp((input.Position.X - SliderBG.AbsolutePosition.X) / SliderBG.AbsoluteSize.X, 0, 1)
     local newFOV = math.floor(10 + (relativeX * 1490))
-    AimAssist.FOV = newFOV
+    
+    -- 🎯 Atualiza o valor apropriado baseado no modo
+    if AimAssist.PriorityMode == "Distance" then
+        AimAssist.MaxFOVForDistance = newFOV
+        FOVLabel.Text = "Max FOV Dist: " .. newFOV .. (newFOV >= 1400 and " (MAX)" or newFOV <= 20 and " (MIN)" or "")
+    else
+        AimAssist.FOV = newFOV
+        FOVLabel.Text = "FOV: " .. newFOV .. (newFOV >= 1400 and " (MAX)" or newFOV <= 20 and " (MIN)" or "")
+    end
+    
     SliderFill.Size = UDim2.new(relativeX, 0, 1, 0)
     SliderKnob.Position = UDim2.new(relativeX, -8, 0.5, -8)
-    FOVLabel.Text = "FOV: " .. newFOV .. (newFOV >= 1400 and " (MAX)" or newFOV <= 20 and " (MIN)" or "")
-    if FOV_Circle then FOV_Circle.Radius = newFOV end
+    
+    if FOV_Circle then 
+        if AimAssist.PriorityMode == "Distance" then
+            FOV_Circle.Radius = AimAssist.MaxFOVForDistance
+        else
+            FOV_Circle.Radius = newFOV 
+        end
+    end
 end
 
 -- Eventos do slider
@@ -609,18 +726,45 @@ ToggleWallCheck.MouseButton1Click:Connect(function()
     ToggleWallCheck.BackgroundColor3 = AimAssist.WallCheck and Color3.fromRGB(50, 150, 50) or Color3.fromRGB(70, 70, 70)
 end)
 
+-- 🎯 NOVO: Função do botão de prioridade
+TogglePriority.MouseButton1Click:Connect(function()
+    if AimAssist.PriorityMode == "Distance" then
+        AimAssist.PriorityMode = "FOV"
+        TogglePriority.Text = "PRIORITY: FOV (CENTER)"
+        TogglePriority.BackgroundColor3 = Color3.fromRGB(255, 100, 0)
+        PriorityLabel.Text = "🎯 Alvo: Mais central (tela)"
+        PriorityLabel.TextColor3 = Color3.fromRGB(255, 200, 0)
+        -- Atualiza o slider para mostrar FOV
+        local relativeX = math.clamp((AimAssist.FOV - 10) / 1490, 0, 1)
+        SliderFill.Size = UDim2.new(relativeX, 0, 1, 0)
+        SliderKnob.Position = UDim2.new(relativeX, -8, 0.5, -8)
+        FOVLabel.Text = "FOV: " .. AimAssist.FOV
+    else
+        AimAssist.PriorityMode = "Distance"
+        TogglePriority.Text = "PRIORITY: DISTANCE"
+        TogglePriority.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
+        PriorityLabel.Text = "🎯 Alvo: Mais próximo (3D)"
+        PriorityLabel.TextColor3 = Color3.fromRGB(0, 255, 255)
+        -- Atualiza o slider para mostrar MaxFOVForDistance
+        local relativeX = math.clamp((AimAssist.MaxFOVForDistance - 10) / 1490, 0, 1)
+        SliderFill.Size = UDim2.new(relativeX, 0, 1, 0)
+        SliderKnob.Position = UDim2.new(relativeX, -8, 0.5, -8)
+        FOVLabel.Text = "Max FOV Dist: " .. AimAssist.MaxFOVForDistance
+    end
+end)
+
 -- Função do botão esconder/mostrar painel
 TogglePanel.MouseButton1Click:Connect(function()
     IsPanelVisible = not IsPanelVisible
-    local elementsToToggle = {ToggleESP, ToggleAim, ToggleShootMode, ToggleMagnet, ToggleLock, ToggleTeamESP, ToggleTeamAim, ToggleWallCheck, StatusLabel, SliderContainer, ModeLabel, WarningLabel}
+    local elementsToToggle = {ToggleESP, ToggleAim, ToggleShootMode, ToggleMagnet, ToggleLock, ToggleTeamESP, ToggleTeamAim, ToggleWallCheck, TogglePriority, StatusLabel, SliderContainer, ModeLabel, PriorityLabel, WarningLabel}
     for _, element in ipairs(elementsToToggle) do
         if element and element:IsA("GuiObject") then
             element.Visible = IsPanelVisible
         end
     end
     if IsPanelVisible then
-        MainFrame.Size = UDim2.new(0, 260, 0, 540)
-        TogglePanel.Position = UDim2.new(0.05, 0, 0, 296)
+        MainFrame.Size = UDim2.new(0, 260, 0, 580)
+        TogglePanel.Position = UDim2.new(0.05, 0, 0, 328)
         TogglePanel.Text = "HIDE PANEL 👁️"
         TogglePanel.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
         Title.Text = "🔥 AIM ASSIST ULTRA 🔥"
@@ -638,10 +782,10 @@ FOV_Circle = Drawing.new("Circle")
 FOV_Circle.Visible = false
 FOV_Circle.Thickness = 2
 FOV_Circle.NumSides = 64
-FOV_Circle.Radius = AimAssist.FOV
+FOV_Circle.Radius = AimAssist.MaxFOVForDistance -- Começa com o do modo Distance
 FOV_Circle.Filled = false
 FOV_Circle.Transparency = 0.3
-FOV_Circle.Color = Color3.fromRGB(255, 0, 0)
+FOV_Circle.Color = Color3.fromRGB(0, 255, 255) -- Ciano para indicar modo distância
 
 -- Loop principal
 if Connection then Connection:Disconnect() end
@@ -747,8 +891,12 @@ end)
 -- Inicializar
 ToggleShootMode.Text = "ON SHOOT ONLY: ON 🎯"
 ToggleShootMode.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
+TogglePriority.Text = "PRIORITY: DISTANCE 🎯"
+TogglePriority.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
 
 print("=== 🔥 AIM ASSIST ULTRA - ATIVA AO ATIRAR 🔥 ===")
+print("🎯 NOVO: Sistema de prioridade por DISTÂNCIA 3D")
 print("FORÇA: 95% (0.95 smoothness)")
 print("F = Toggle Aim Assist (liga/desliga)")
 print("Insert = Esconder/mostrar painel")
+print("Modo Distance: Pega o inimigo mais próximo de você (não mais central)")
