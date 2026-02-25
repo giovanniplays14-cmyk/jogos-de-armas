@@ -1,56 +1,68 @@
--- ESP Script com Aim Assist ULTRA FORTE - ATIVA AO ATIRAR (CORRIGIDO)
--- Criado para Roblox
--- 🎯 NOVO: Prioriza oponente mais próximo por distância 3D, não por FOV
--- 👻 NOVO: Modo "Invisível" - Esconde visualmente (client-side apenas)
+-- ESP + Aim Assist ULTRA FORTE - VERSÃO FINAL MESCLADA
+-- Combina: Interface da v2 + Funcionalidades avançadas da v1
+-- Criado para Roblox - 2025
 
+-- Verifica se já está rodando
+if getgenv().ESPUltraRunning then
+    warn("Script já está rodando!")
+    return
+end
+getgenv().ESPUltraRunning = true
+
+-- Serviços
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
 
 -- Variáveis globais
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
 local Mouse = LocalPlayer:GetMouse()
 
--- Configurações
+-- Aguarda o personagem carregar
+if not LocalPlayer.Character then
+    LocalPlayer.CharacterAdded:Wait()
+end
+
+-- Verifica Drawing library
+local Drawing = Drawing or getgenv().Drawing
+if not Drawing then
+    warn("Drawing library não disponível!")
+    return
+end
+
+-- Configurações ESP
 local ESP = {
     Enabled = false,
     TeamCheck = false,
     MaxDistance = 3000,
     BoxColor = Color3.fromRGB(255, 0, 0),
     TextColor = Color3.fromRGB(255, 255, 255),
-    TextSize = 14
+    TextSize = 14,
+    Boxes = true,
+    Names = true,
+    Distances = true,
+    Tracers = true
 }
 
--- Configurações do Aim Assist
+-- Configurações Aim Assist (Valores ULTRA FORTES da v2)
 local AimAssist = {
     Enabled = false,
     AlwaysOn = false,
     ShootToActivate = true,
     TeamCheck = true,
-    Smoothness = 0.95,
-    SnapSmoothness = 0.99,
-    FOV = 1000,
-    MaxDistance = 2000,
+    Smoothness = 0.95,        -- ULTRA FORTE (0.95 = quase instantâneo)
+    SnapSmoothness = 0.99,    -- SNAP quando muito perto
+    FOV = 1000,               -- FOV grande padrão
+    MaxDistance = 2000,       -- Distância máxima
     TargetPart = "Head",
     WallCheck = false,
-    MagnetMode = false,
-    LockTarget = false,
-    PriorityMode = "Distance",
-    MaxFOVForDistance = 800
-}
-
--- 👻 Configurações de Invisibilidade (CLIENT-SIDE APENAS)
-local Invisibility = {
-    Enabled = false,
-    OriginalTransparency = {},
-    InvisibleTransparency = 1, -- 100% invisível para você
-    HideName = true,
-    -- 🔴 AVISO: Os métodos abaixo são tentativas, não garantem invisibilidade real
-    AttemptServerSide = false, -- Tenta métodos avançados (pode não funcionar/ser detectado)
-    AntiHitbox = false         -- Tenta diminuir hitbox (arriscado)
+    MagnetMode = false,       -- Modo ímã
+    LockTarget = false,       -- Travar alvo
+    PriorityMode = "FOV",     -- "FOV" ou "Distance"
+    MaxFOVForDistance = 800   -- FOV máximo quando em modo Distance
 }
 
 -- Variáveis de controle
@@ -63,10 +75,9 @@ local IsShooting = false
 local LastClickTime = 0
 local IsPanelVisible = true
 local IsDraggingSlider = false
-local InvisibilityConnection = nil
-local OriginalCharacterProperties = {}
+local ScreenGui = nil
 
--- Atualizar referências
+-- Atualizar referências (da v2)
 local function UpdateReferences()
     LocalPlayer = Players.LocalPlayer
     if LocalPlayer then
@@ -75,234 +86,14 @@ local function UpdateReferences()
     Camera = Workspace.CurrentCamera
 end
 
--- 👻 FUNÇÃO: Salvar propriedades originais
-local function SaveOriginalTransparency(character)
-    OriginalCharacterProperties[character] = {}
-    for _, part in pairs(character:GetDescendants()) do
-        if part:IsA("BasePart") then
-            OriginalCharacterProperties[character][part] = {
-                Transparency = part.Transparency,
-                CastShadow = part.CastShadow,
-                LocalTransparencyModifier = part.LocalTransparencyModifier,
-                Size = part.Size,
-                Massless = part.Massless
-            }
-        elseif part:IsA("Decal") or part:IsA("Texture") then
-            OriginalCharacterProperties[character][part] = {
-                Transparency = part.Transparency
-            }
-        elseif part:IsA("BillboardGui") then
-            OriginalCharacterProperties[character][part] = {
-                Enabled = part.Enabled
-            }
-        end
-    end
-end
-
--- 👻 FUNÇÃO: Invisibilidade CLIENT-SIDE (só você não vê seu personagem)
-local function ApplyClientSideInvisibility()
-    if not LocalPlayer.Character then return end
-    
-    local character = LocalPlayer.Character
-    
-    if not OriginalCharacterProperties[character] then
-        SaveOriginalTransparency(character)
-    end
-    
-    -- Torna tudo invisível na SUA tela apenas
-    for _, part in pairs(character:GetDescendants()) do
-        if part:IsA("BasePart") then
-            part.Transparency = 1
-            part.CastShadow = false
-            part.LocalTransparencyModifier = 1
-        elseif part:IsA("Decal") or part:IsA("Texture") then
-            part.Transparency = 1
-        elseif part:IsA("BillboardGui") and Invisibility.HideName then
-            part.Enabled = false
-        elseif part:IsA("ParticleEmitter") or part:IsA("Trail") then
-            part.Enabled = false
-        elseif part:IsA("PointLight") or part:IsA("SpotLight") or part:IsA("SurfaceLight") then
-            part.Enabled = false
-        end
-    end
-    
-    -- Esconde acessórios
-    for _, accessory in pairs(character:GetChildren()) do
-        if accessory:IsA("Accessory") then
-            local handle = accessory:FindFirstChild("Handle")
-            if handle and handle:IsA("BasePart") then
-                handle.Transparency = 1
-                handle.CastShadow = false
-                handle.LocalTransparencyModifier = 1
-                for _, decal in pairs(handle:GetDescendants()) do
-                    if decal:IsA("Decal") or decal:IsA("Texture") then
-                        decal.Transparency = 1
-                    end
-                end
-            end
-        end
-    end
-    
-    -- Esconde ferramentas
-    for _, tool in pairs(character:GetChildren()) do
-        if tool:IsA("Tool") then
-            for _, part in pairs(tool:GetDescendants()) do
-                if part:IsA("BasePart") then
-                    part.Transparency = 1
-                    part.CastShadow = false
-                    part.LocalTransparencyModifier = 1
-                elseif part:IsA("Decal") or part:IsA("Texture") then
-                    part.Transparency = 1
-                end
-            end
-        end
-    end
-    
-    -- Desativa highlight
-    local highlight = character:FindFirstChildOfClass("Highlight")
-    if highlight then
-        highlight.Enabled = false
-    end
-end
-
--- 👻 FUNÇÃO: Tentar invisibilidade SERVER-SIDE (experimental, provavelmente não funciona)
-local function AttemptServerSideInvisibility()
-    -- 🔴 AVISO: Isso provavelmente NÃO FUNCIONA na maioria dos jogos
-    -- e pode resultar em kick/ban. Use por sua conta e risco.
-    
-    local character = LocalPlayer.Character
-    if not character then return end
-    
-    -- Método 1: Tenta desativar render do personagem (só funciona localmente)
-    for _, part in pairs(character:GetChildren()) do
-        if part:IsA("BasePart") then
-            -- Torna massless (não afeta física, mas alguns jogos detectam)
-            part.Massless = true
-        end
-    end
-    
-    -- Método 2: Tenta manipular propriedades de rede (arriscado)
-    pcall(function()
-        -- Isso pode causar desync e kick
-        for _, part in pairs(character:GetDescendants()) do
-            if part:IsA("BasePart") then
-                -- Tenta setar propriedade arquivada (pode crashar)
-                part:SetAttribute("OriginalTransparency", part.Transparency)
-            end
-        end
-    end)
-    
-    print("⚠️ Tentativa server-side aplicada (provavelmente não funciona)")
-end
-
--- 👻 FUNÇÃO: Remover invisibilidade
-local function RemoveInvisibility()
-    if not LocalPlayer.Character then return end
-    
-    local character = LocalPlayer.Character
-    
-    if OriginalCharacterProperties[character] then
-        for obj, properties in pairs(OriginalCharacterProperties[character]) do
-            if obj and obj.Parent then
-                for prop, value in pairs(properties) do
-                    pcall(function()
-                        obj[prop] = value
-                    end)
-                end
-            end
-        end
-    else
-        -- Fallback
-        for _, part in pairs(character:GetDescendants()) do
-            if part:IsA("BasePart") then
-                part.Transparency = 0
-                part.CastShadow = true
-                part.LocalTransparencyModifier = 0
-            elseif part:IsA("Decal") or part:IsA("Texture") then
-                part.Transparency = 0
-            elseif part:IsA("BillboardGui") then
-                part.Enabled = true
-            elseif part:IsA("ParticleEmitter") or part:IsA("Trail") then
-                part.Enabled = true
-            elseif part:IsA("PointLight") or part:IsA("SpotLight") or part:IsA("SurfaceLight") then
-                part.Enabled = true
-            end
-        end
-    end
-    
-    local highlight = character:FindFirstChildOfClass("Highlight")
-    if highlight then
-        highlight.Enabled = true
-    end
-end
-
--- 👻 FUNÇÃO: Toggle invisibilidade
-local function ToggleInvisibility()
-    Invisibility.Enabled = not Invisibility.Enabled
-    
-    if Invisibility.Enabled then
-        ApplyClientSideInvisibility()
-        
-        -- Tenta métodos server-side se ativado (não recomendado)
-        if Invisibility.AttemptServerSide then
-            AttemptServerSideInvisibility()
-        end
-        
-        -- Mantém invisível
-        if InvisibilityConnection then InvisibilityConnection:Disconnect() end
-        InvisibilityConnection = RunService.RenderStepped:Connect(function()
-            if Invisibility.Enabled and LocalPlayer.Character then
-                for _, part in pairs(LocalPlayer.Character:GetDescendants()) do
-                    if part:IsA("BasePart") and part.Transparency < 1 then
-                        part.Transparency = 1
-                        part.CastShadow = false
-                        part.LocalTransparencyModifier = 1
-                    elseif (part:IsA("Decal") or part:IsA("Texture")) and part.Transparency < 1 then
-                        part.Transparency = 1
-                    end
-                end
-                
-                -- Verifica ferramentas novas
-                for _, tool in pairs(LocalPlayer.Character:GetChildren()) do
-                    if tool:IsA("Tool") and tool:FindFirstChild("Handle") then
-                        local handle = tool:FindFirstChild("Handle")
-                        if handle and handle:IsA("BasePart") and handle.Transparency < 1 then
-                            for _, part in pairs(tool:GetDescendants()) do
-                                if part:IsA("BasePart") then
-                                    part.Transparency = 1
-                                    part.CastShadow = false
-                                    part.LocalTransparencyModifier = 1
-                                elseif part:IsA("Decal") or part:IsA("Texture") then
-                                    part.Transparency = 1
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end)
-    else
-        RemoveInvisibility()
-        if InvisibilityConnection then
-            InvisibilityConnection:Disconnect()
-            InvisibilityConnection = nil
-        end
-    end
-    
-    return Invisibility.Enabled
-end
-
--- Criar ESP
+-- Criar ESP (mesclado v1+v2)
 local function CreateESP(player)
     if player == LocalPlayer then return end
-    if ESPObjects[player] then 
-        for _, v in pairs(ESPObjects[player]) do
-            if v then v:Remove() end
-        end
-    end
+    if ESPObjects[player] then RemoveESP(player) end
     
     local drawings = {}
     
+    -- Box
     drawings.Box = Drawing.new("Square")
     drawings.Box.Visible = false
     drawings.Box.Color = ESP.BoxColor
@@ -310,6 +101,7 @@ local function CreateESP(player)
     drawings.Box.Filled = false
     drawings.Box.Transparency = 1
     
+    -- Nome
     drawings.Name = Drawing.new("Text")
     drawings.Name.Visible = false
     drawings.Name.Color = ESP.TextColor
@@ -318,6 +110,7 @@ local function CreateESP(player)
     drawings.Name.Outline = true
     drawings.Name.OutlineColor = Color3.fromRGB(0, 0, 0)
     
+    -- Distância
     drawings.Distance = Drawing.new("Text")
     drawings.Distance.Visible = false
     drawings.Distance.Color = ESP.TextColor
@@ -326,6 +119,7 @@ local function CreateESP(player)
     drawings.Distance.Outline = true
     drawings.Distance.OutlineColor = Color3.fromRGB(0, 0, 0)
     
+    -- Tracer/Line (da v2)
     drawings.Line = Drawing.new("Line")
     drawings.Line.Visible = false
     drawings.Line.Color = Color3.fromRGB(255, 0, 0)
@@ -343,6 +137,7 @@ local function RemoveESP(player)
     end
 end
 
+-- Verificar visibilidade (Wall Check)
 local function IsVisible(targetPosition)
     if not AimAssist.WallCheck then return true end
     if not LocalPlayer.Character then return false end
@@ -358,22 +153,26 @@ local function IsVisible(targetPosition)
     return result == nil
 end
 
+-- GetClosestPlayerByDistance (da v1 - avançado)
 local function GetClosestPlayerByDistance()
     if not LocalPlayer.Character then return nil end
-    local myHumanoid = LocalPlayer.Character:FindFirstChild("Humanoid")
-    local myRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    local myHumanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+    local myRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart") or LocalPlayer.Character:FindFirstChild("Torso")
     if not myHumanoid or not myRoot or myHumanoid.Health <= 0 then return nil end
     
     local closestPlayer = nil
     local shortestDistance = AimAssist.MaxDistance
     local centerScreen = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     
+    -- Verifica target travado
     if AimAssist.LockTarget and LockedTarget and LockedTarget.Character then
         local targetPart = LockedTarget.Character:FindFirstChild(AimAssist.TargetPart)
-        local humanoid = LockedTarget.Character:FindFirstChild("Humanoid")
+        local humanoid = LockedTarget.Character:FindFirstChildOfClass("Humanoid")
         if targetPart and humanoid and humanoid.Health > 0 then
             local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
-            if onScreen then return LockedTarget end
+            if onScreen and (Vector2.new(screenPos.X, screenPos.Y) - centerScreen).Magnitude <= AimAssist.MaxFOVForDistance then
+                return LockedTarget
+            end
         end
         LockedTarget = nil
     end
@@ -385,7 +184,7 @@ local function GetClosestPlayerByDistance()
         local character = player.Character
         if not character then continue end
         
-        local humanoid = character:FindFirstChild("Humanoid")
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
         local targetPart = character:FindFirstChild(AimAssist.TargetPart)
         
         if not humanoid or not targetPart or humanoid.Health <= 0 then continue end
@@ -414,19 +213,21 @@ local function GetClosestPlayerByDistance()
     return closestPlayer
 end
 
+-- GetClosestPlayerByFOV (da v1 - avançado)
 local function GetClosestPlayerByFOV()
     if not LocalPlayer.Character then return nil end
-    local myHumanoid = LocalPlayer.Character:FindFirstChild("Humanoid")
-    local myRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    local myHumanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+    local myRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart") or LocalPlayer.Character:FindFirstChild("Torso")
     if not myHumanoid or not myRoot or myHumanoid.Health <= 0 then return nil end
     
     local closestPlayer = nil
     local shortestScreenDistance = AimAssist.FOV
     local centerScreen = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     
+    -- Verifica target travado
     if AimAssist.LockTarget and LockedTarget and LockedTarget.Character then
         local targetPart = LockedTarget.Character:FindFirstChild(AimAssist.TargetPart)
-        local humanoid = LockedTarget.Character:FindFirstChild("Humanoid")
+        local humanoid = LockedTarget.Character:FindFirstChildOfClass("Humanoid")
         if targetPart and humanoid and humanoid.Health > 0 then
             local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
             if onScreen then return LockedTarget end
@@ -441,7 +242,7 @@ local function GetClosestPlayerByFOV()
         local character = player.Character
         if not character then continue end
         
-        local humanoid = character:FindFirstChild("Humanoid")
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
         local targetPart = character:FindFirstChild(AimAssist.TargetPart)
         
         if not humanoid or not targetPart or humanoid.Health <= 0 then continue end
@@ -468,6 +269,7 @@ local function GetClosestPlayerByFOV()
     return closestPlayer
 end
 
+-- GetClosestPlayer unificado (da v1)
 local function GetClosestPlayer()
     if AimAssist.PriorityMode == "Distance" then
         return GetClosestPlayerByDistance()
@@ -476,6 +278,7 @@ local function GetClosestPlayer()
     end
 end
 
+-- ApplyAimAssist ULTRA FORTE (da v2 com melhorias da v1)
 local function ApplyAimAssist()
     UpdateReferences()
     
@@ -487,7 +290,7 @@ local function ApplyAimAssist()
     end
     
     if not LocalPlayer.Character then return end
-    local myHumanoid = LocalPlayer.Character:FindFirstChild("Humanoid")
+    local myHumanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
     if not myHumanoid or myHumanoid.Health <= 0 then return end
     
     CurrentTarget = GetClosestPlayer()
@@ -507,15 +310,16 @@ local function ApplyAimAssist()
             local centerScreen = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
             local distanceFromCenter = (Vector2.new(screenPos.X, screenPos.Y) - centerScreen).Magnitude
             
+            -- Sistema de suavidade ULTRA FORTE (da v2)
             local smoothValue
             if distanceFromCenter < 30 then
-                smoothValue = AimAssist.SnapSmoothness
+                smoothValue = AimAssist.SnapSmoothness  -- 0.99 = SNAP instantâneo
             elseif distanceFromCenter < 100 then
                 smoothValue = 0.95
             elseif AimAssist.MagnetMode then
                 smoothValue = 0.9
             else
-                smoothValue = AimAssist.Smoothness
+                smoothValue = AimAssist.Smoothness      -- 0.95 padrão
             end
             
             Camera.CFrame = cameraCF:Lerp(targetCF, smoothValue)
@@ -525,15 +329,17 @@ local function ApplyAimAssist()
     end
 end
 
+-- UpdateESP mesclado (v1 + v2)
 local function UpdateESP()
     UpdateReferences()
     
     if not LocalPlayer.Character then return end
-    local myRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    local myRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart") or LocalPlayer.Character:FindFirstChild("Torso")
     if not myRoot then return end
     
     local centerScreen = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     
+    -- Atualizar FOV Circle com cores dinâmicas (da v1)
     if FOV_Circle then
         local showCircle = AimAssist.AlwaysOn or (AimAssist.Enabled and (IsShooting or not AimAssist.ShootToActivate))
         FOV_Circle.Visible = showCircle
@@ -541,10 +347,10 @@ local function UpdateESP()
         
         if AimAssist.PriorityMode == "Distance" then
             FOV_Circle.Radius = AimAssist.MaxFOVForDistance
-            FOV_Circle.Color = Color3.fromRGB(0, 255, 255)
+            FOV_Circle.Color = Color3.fromRGB(0, 255, 255)  -- Ciano para Distance
         else
             FOV_Circle.Radius = AimAssist.FOV
-            FOV_Circle.Color = Color3.fromRGB(255, 0, 0)
+            FOV_Circle.Color = Color3.fromRGB(255, 0, 0)    -- Vermelho para FOV
         end
         
         if CurrentTarget and IsShooting then
@@ -571,8 +377,8 @@ local function UpdateESP()
             continue
         end
         
-        local humanoid = character:FindFirstChild("Humanoid")
-        local rootPart = character:FindFirstChild("HumanoidRootPart")
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        local rootPart = character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Torso")
         
         if not humanoid or not rootPart or humanoid.Health <= 0 then
             for _, d in pairs(drawings) do d.Visible = false end
@@ -600,6 +406,7 @@ local function UpdateESP()
         drawings.Box.Position = Vector2.new(rootPosition.X - width/2, rootPosition.Y - height/2)
         drawings.Box.Visible = true
         
+        -- Estilo do alvo atual (mesclado v1+v2)
         if player == CurrentTarget then
             if IsShooting then
                 drawings.Box.Color = Color3.fromRGB(255, 0, 0)
@@ -611,6 +418,7 @@ local function UpdateESP()
             drawings.Box.Filled = true
             drawings.Box.Transparency = 0.3
             
+            -- Line para o centro (da v2)
             drawings.Line.From = centerScreen
             drawings.Line.To = Vector2.new(rootPosition.X, rootPosition.Y)
             drawings.Line.Visible = true
@@ -619,393 +427,566 @@ local function UpdateESP()
             drawings.Box.Color = ESP.BoxColor
             drawings.Box.Thickness = 2
             drawings.Box.Filled = false
+            drawings.Box.Transparency = 1
             drawings.Line.Visible = false
         end
         
+        -- Nome com indicadores
         drawings.Name.Text = player.Name .. (player == CurrentTarget and (IsShooting and " [FIRING]" or " [TARGET]") or "")
         drawings.Name.Position = Vector2.new(rootPosition.X, rootPosition.Y - height/2 - 15)
         drawings.Name.Visible = true
         drawings.Name.Color = (player == CurrentTarget) and (IsShooting and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(255, 255, 0)) or ESP.TextColor
         drawings.Name.Size = (player == CurrentTarget) and 16 or ESP.TextSize
         
+        -- Distância
         drawings.Distance.Text = math.floor(distance) .. "m"
         drawings.Distance.Position = Vector2.new(rootPosition.X, rootPosition.Y + height/2 + 5)
         drawings.Distance.Visible = true
     end
 end
 
--- Interface
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "ESPMenu"
-ScreenGui.Parent = game.CoreGui
-ScreenGui.ResetOnSpawn = false
-
-local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 280, 0, 680) -- Aumentado para avisos
-MainFrame.Position = UDim2.new(0, 20, 0, 20)
-MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-MainFrame.BorderSizePixel = 0
-MainFrame.Active = true
-MainFrame.Draggable = true
-MainFrame.Parent = ScreenGui
-
-local UICorner = Instance.new("UICorner")
-UICorner.CornerRadius = UDim.new(0, 8)
-UICorner.Parent = MainFrame
-
--- Título
-local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, 0, 0, 35)
-Title.BackgroundColor3 = Color3.fromRGB(180, 0, 0)
-Title.BorderSizePixel = 0
-Title.Text = "🔥 AIM ASSIST ULTRA 🔥"
-Title.TextColor3 = Color3.fromRGB(255, 255, 255)
-Title.TextSize = 18
-Title.Font = Enum.Font.GothamBold
-Title.Parent = MainFrame
-
-local TitleCorner = Instance.new("UICorner")
-TitleCorner.CornerRadius = UDim.new(0, 8)
-TitleCorner.Parent = Title
-
--- Função botão
-local function CreateButton(name, posY, color, textSize)
-    local Button = Instance.new("TextButton")
-    Button.Size = UDim2.new(0.9, 0, 0, 28)
-    Button.Position = UDim2.new(0.05, 0, 0, posY)
-    Button.BackgroundColor3 = color or Color3.fromRGB(70, 70, 70)
-    Button.BorderSizePixel = 0
-    Button.Text = name .. ": OFF"
-    Button.TextColor3 = Color3.fromRGB(255, 255, 255)
-    Button.TextSize = textSize or 11
-    Button.Font = Enum.Font.GothamBold
-    Button.Parent = MainFrame
+-- CRIAR INTERFACE (baseada na v2 com elementos da v1)
+local function CreateGUI()
+    local parent = gethui and gethui() or LocalPlayer:WaitForChild("PlayerGui")
     
-    local Corner = Instance.new("UICorner")
-    Corner.CornerRadius = UDim.new(0, 6)
-    Corner.Parent = Button
-    
-    return Button
-end
+    ScreenGui = Instance.new("ScreenGui")
+    ScreenGui.Name = "ESPMenu_" .. tostring(math.random(1000, 9999))
+    ScreenGui.Parent = parent
+    ScreenGui.ResetOnSpawn = false
+    ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
--- Botões
-local ToggleESP = CreateButton("ESP", 40, Color3.fromRGB(200, 50, 50))
-local ToggleAim = CreateButton("AIM ASSIST", 72, Color3.fromRGB(200, 50, 50), 12)
-local ToggleShootMode = CreateButton("ON SHOOT ONLY", 104, Color3.fromRGB(0, 100, 200))
-local ToggleMagnet = CreateButton("MAGNET MODE", 136, Color3.fromRGB(150, 0, 150))
-local ToggleLock = CreateButton("LOCK TARGET", 168, Color3.fromRGB(100, 100, 0))
-local ToggleTeamESP = CreateButton("Team Check ESP", 200, Color3.fromRGB(70, 70, 70))
-local ToggleTeamAim = CreateButton("Team Check Aim", 232, Color3.fromRGB(50, 150, 50))
-local ToggleWallCheck = CreateButton("Wall Check", 264, Color3.fromRGB(70, 70, 70))
-local TogglePriority = CreateButton("PRIORITY: DISTANCE", 296, Color3.fromRGB(0, 150, 255), 11)
+    local MainFrame = Instance.new("Frame")
+    MainFrame.Size = UDim2.new(0, 280, 0, 580)  -- Aumentado para caber botão de prioridade
+    MainFrame.Position = UDim2.new(0, 20, 0, 20)
+    MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    MainFrame.BorderSizePixel = 0
+    MainFrame.Active = true
+    MainFrame.Draggable = true
+    MainFrame.Parent = ScreenGui
 
--- 👻 BOTÃO: Invisibilidade (CLIENT-SIDE)
-local ToggleInvis = CreateButton("INVISIBILITY", 328, Color3.fromRGB(100, 0, 150), 11)
+    local UICorner = Instance.new("UICorner")
+    UICorner.CornerRadius = UDim.new(0, 8)
+    UICorner.Parent = MainFrame
 
--- Botão para esconder/mostrar painel
-local TogglePanel = CreateButton("HIDE PANEL", 360, Color3.fromRGB(100, 100, 100))
-TogglePanel.Text = "HIDE PANEL 👁️"
+    -- Título
+    local Title = Instance.new("TextLabel")
+    Title.Size = UDim2.new(1, 0, 0, 35)
+    Title.BackgroundColor3 = Color3.fromRGB(180, 0, 0)
+    Title.BorderSizePixel = 0
+    Title.Text = "🔥 AIM ASSIST ULTRA 🔥"
+    Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Title.TextSize = 18
+    Title.Font = Enum.Font.GothamBold
+    Title.Parent = MainFrame
 
--- Container do Slider de FOV
-local SliderContainer = Instance.new("Frame")
-SliderContainer.Size = UDim2.new(0.9, 0, 0, 50)
-SliderContainer.Position = UDim2.new(0.05, 0, 0, 392)
-SliderContainer.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-SliderContainer.BorderSizePixel = 0
-SliderContainer.Parent = MainFrame
+    local TitleCorner = Instance.new("UICorner")
+    TitleCorner.CornerRadius = UDim.new(0, 8)
+    TitleCorner.Parent = Title
 
-local SliderCorner = Instance.new("UICorner")
-SliderCorner.CornerRadius = UDim.new(0, 6)
-SliderCorner.Parent = SliderContainer
-
--- Label do FOV
-local FOVLabel = Instance.new("TextLabel")
-FOVLabel.Size = UDim2.new(1, 0, 0, 20)
-FOVLabel.Position = UDim2.new(0, 0, 0, 5)
-FOVLabel.BackgroundTransparency = 1
-FOVLabel.Text = "FOV: 1000"
-FOVLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
-FOVLabel.TextSize = 12
-FOVLabel.Font = Enum.Font.GothamBold
-FOVLabel.Parent = SliderContainer
-
--- Barra de fundo do slider
-local SliderBG = Instance.new("Frame")
-SliderBG.Size = UDim2.new(0.9, 0, 0, 8)
-SliderBG.Position = UDim2.new(0.05, 0, 0, 28)
-SliderBG.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-SliderBG.BorderSizePixel = 0
-SliderBG.Parent = SliderContainer
-
-local SliderBGCorner = Instance.new("UICorner")
-SliderBGCorner.CornerRadius = UDim.new(0, 4)
-SliderBGCorner.Parent = SliderBG
-
--- Barra de preenchimento
-local SliderFill = Instance.new("Frame")
-SliderFill.Size = UDim2.new(0.5, 0, 1, 0)
-SliderFill.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
-SliderFill.BorderSizePixel = 0
-SliderFill.Parent = SliderBG
-
-local SliderFillCorner = Instance.new("UICorner")
-SliderFillCorner.CornerRadius = UDim.new(0, 4)
-SliderFillCorner.Parent = SliderFill
-
--- Botão arrastável
-local SliderKnob = Instance.new("TextButton")
-SliderKnob.Size = UDim2.new(0, 16, 0, 16)
-SliderKnob.Position = UDim2.new(0.5, -8, 0.5, -8)
-SliderKnob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-SliderKnob.BorderSizePixel = 0
-SliderKnob.Text = ""
-SliderKnob.Parent = SliderBG
-
-local SliderKnobCorner = Instance.new("UICorner")
-SliderKnobCorner.CornerRadius = UDim.new(1, 0)
-SliderKnobCorner.Parent = SliderKnob
-
--- Labels min/max
-local MinLabel = Instance.new("TextLabel")
-MinLabel.Size = UDim2.new(0, 30, 0, 15)
-MinLabel.Position = UDim2.new(0.05, 0, 0, 38)
-MinLabel.BackgroundTransparency = 1
-MinLabel.Text = "10"
-MinLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
-MinLabel.TextSize = 9
-MinLabel.Font = Enum.Font.Gotham
-MinLabel.Parent = SliderContainer
-
-local MaxLabel = Instance.new("TextLabel")
-MaxLabel.Size = UDim2.new(0, 30, 0, 15)
-MaxLabel.Position = UDim2.new(0.85, 0, 0, 38)
-MaxLabel.BackgroundTransparency = 1
-MaxLabel.Text = "1500"
-MaxLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
-MaxLabel.TextSize = 9
-MaxLabel.Font = Enum.Font.Gotham
-MaxLabel.Parent = SliderContainer
-
--- Status label
-local StatusLabel = Instance.new("TextLabel")
-StatusLabel.Size = UDim2.new(0.9, 0, 0, 20)
-StatusLabel.Position = UDim2.new(0.05, 0, 0, 446)
-StatusLabel.BackgroundTransparency = 1
-StatusLabel.Text = "Status: Esperando tiro..."
-StatusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
-StatusLabel.TextSize = 10
-StatusLabel.Font = Enum.Font.GothamBold
-StatusLabel.Parent = MainFrame
-
--- Label modo
-local ModeLabel = Instance.new("TextLabel")
-ModeLabel.Size = UDim2.new(0.9, 0, 0, 30)
-ModeLabel.Position = UDim2.new(0.05, 0, 0, 469)
-ModeLabel.BackgroundTransparency = 1
-ModeLabel.Text = "MODO: Clique esquerdo para ativar aim"
-ModeLabel.TextColor3 = Color3.fromRGB(0, 200, 255)
-ModeLabel.TextSize = 10
-ModeLabel.Font = Enum.Font.Gotham
-ModeLabel.TextWrapped = true
-ModeLabel.Parent = MainFrame
-
--- Label de prioridade
-local PriorityLabel = Instance.new("TextLabel")
-PriorityLabel.Size = UDim2.new(0.9, 0, 0, 20)
-PriorityLabel.Position = UDim2.new(0.05, 0, 0, 499)
-PriorityLabel.BackgroundTransparency = 1
-PriorityLabel.Text = "🎯 Alvo: Mais próximo (3D)"
-PriorityLabel.TextColor3 = Color3.fromRGB(0, 255, 255)
-PriorityLabel.TextSize = 10
-PriorityLabel.Font = Enum.Font.GothamBold
-PriorityLabel.Parent = MainFrame
-
--- 👻 LABEL: Status de invisibilidade com AVISO
-local InvisLabel = Instance.new("TextLabel")
-InvisLabel.Size = UDim2.new(0.9, 0, 0, 20)
-InvisLabel.Position = UDim2.new(0.05, 0, 0, 519)
-InvisLabel.BackgroundTransparency = 1
-InvisLabel.Text = "👻 Visibilidade: Normal"
-InvisLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-InvisLabel.TextSize = 10
-InvisLabel.Font = Enum.Font.GothamBold
-InvisLabel.Parent = MainFrame
-
--- 🔴 AVISO IMPORTANTE sobre invisibilidade
-local WarningInvisLabel = Instance.new("TextLabel")
-WarningInvisLabel.Size = UDim2.new(0.9, 0, 0, 30)
-WarningInvisLabel.Position = UDim2.new(0.05, 0, 0, 539)
-WarningInvisLabel.BackgroundTransparency = 1
-WarningInvisLabel.Text = "⚠️ INVISIBILIDADE: Apenas você não vê seu personagem! Oponentes ainda te veem normalmente."
-WarningInvisLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
-WarningInvisLabel.TextSize = 9
-WarningInvisLabel.Font = Enum.Font.Gotham
-WarningInvisLabel.TextWrapped = true
-WarningInvisLabel.Parent = MainFrame
-
--- Aviso geral
-local WarningLabel = Instance.new("TextLabel")
-WarningLabel.Size = UDim2.new(0.9, 0, 0, 25)
-WarningLabel.Position = UDim2.new(0.05, 0, 0, 645)
-WarningLabel.BackgroundTransparency = 1
-WarningLabel.Text = "⚠️ ULTRA FORTE | Smooth: 0.95"
-WarningLabel.TextColor3 = Color3.fromRGB(255, 200, 0)
-WarningLabel.TextSize = 10
-WarningLabel.Font = Enum.Font.Gotham
-WarningLabel.Parent = MainFrame
-
--- Função para atualizar o slider
-local function UpdateSlider(input)
-    local relativeX = math.clamp((input.Position.X - SliderBG.AbsolutePosition.X) / SliderBG.AbsoluteSize.X, 0, 1)
-    local newFOV = math.floor(10 + (relativeX * 1490))
-    
-    if AimAssist.PriorityMode == "Distance" then
-        AimAssist.MaxFOVForDistance = newFOV
-        FOVLabel.Text = "Max FOV Dist: " .. newFOV .. (newFOV >= 1400 and " (MAX)" or newFOV <= 20 and " (MIN)" or "")
-    else
-        AimAssist.FOV = newFOV
-        FOVLabel.Text = "FOV: " .. newFOV .. (newFOV >= 1400 and " (MAX)" or newFOV <= 20 and " (MIN)" or "")
+    -- Função botão
+    local function CreateButton(name, posY, color, textSize)
+        local Button = Instance.new("TextButton")
+        Button.Size = UDim2.new(0.9, 0, 0, 28)
+        Button.Position = UDim2.new(0.05, 0, 0, posY)
+        Button.BackgroundColor3 = color or Color3.fromRGB(70, 70, 70)
+        Button.BorderSizePixel = 0
+        Button.Text = name .. ": OFF"
+        Button.TextColor3 = Color3.fromRGB(255, 255, 255)
+        Button.TextSize = textSize or 11
+        Button.Font = Enum.Font.GothamBold
+        Button.Parent = MainFrame
+        
+        local Corner = Instance.new("UICorner")
+        Corner.CornerRadius = UDim.new(0, 6)
+        Corner.Parent = Button
+        
+        return Button
     end
+
+    -- Botões principais
+    local ToggleESP = CreateButton("ESP", 40, Color3.fromRGB(200, 50, 50))
+    local ToggleAim = CreateButton("AIM ASSIST", 72, Color3.fromRGB(200, 50, 50), 12)
+    local ToggleShootMode = CreateButton("ON SHOOT ONLY", 104, Color3.fromRGB(0, 100, 200))
+    local ToggleMagnet = CreateButton("MAGNET MODE", 136, Color3.fromRGB(150, 0, 150))
+    local ToggleLock = CreateButton("LOCK TARGET", 168, Color3.fromRGB(100, 100, 0))
+    local ToggleTeamESP = CreateButton("Team Check ESP", 200, Color3.fromRGB(70, 70, 70))
+    local ToggleTeamAim = CreateButton("Team Check Aim", 232, Color3.fromRGB(50, 150, 50))
+    local ToggleWallCheck = CreateButton("Wall Check", 264, Color3.fromRGB(70, 70, 70))
     
-    SliderFill.Size = UDim2.new(relativeX, 0, 1, 0)
-    SliderKnob.Position = UDim2.new(relativeX, -8, 0.5, -8)
+    -- NOVO: Botão de Prioridade (da v1)
+    local TogglePriority = CreateButton("PRIORITY: FOV", 296, Color3.fromRGB(0, 150, 255), 11)
     
-    if FOV_Circle then 
+    -- Botão esconder painel
+    local TogglePanel = CreateButton("HIDE PANEL", 328, Color3.fromRGB(100, 100, 100))
+    TogglePanel.Text = "HIDE PANEL 👁️"
+
+    -- SLIDER DE FOV (da v2)
+    local SliderContainer = Instance.new("Frame")
+    SliderContainer.Size = UDim2.new(0.9, 0, 0, 50)
+    SliderContainer.Position = UDim2.new(0.05, 0, 0, 360)
+    SliderContainer.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    SliderContainer.BorderSizePixel = 0
+    SliderContainer.Parent = MainFrame
+
+    local SliderCorner = Instance.new("UICorner")
+    SliderCorner.CornerRadius = UDim.new(0, 6)
+    SliderCorner.Parent = SliderContainer
+
+    local FOVLabel = Instance.new("TextLabel")
+    FOVLabel.Size = UDim2.new(1, 0, 0, 20)
+    FOVLabel.Position = UDim2.new(0, 0, 0, 5)
+    FOVLabel.BackgroundTransparency = 1
+    FOVLabel.Text = "FOV: 1000"
+    FOVLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+    FOVLabel.TextSize = 12
+    FOVLabel.Font = Enum.Font.GothamBold
+    FOVLabel.Parent = SliderContainer
+
+    local SliderBG = Instance.new("Frame")
+    SliderBG.Size = UDim2.new(0.9, 0, 0, 8)
+    SliderBG.Position = UDim2.new(0.05, 0, 0, 28)
+    SliderBG.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    SliderBG.BorderSizePixel = 0
+    SliderBG.Parent = SliderContainer
+
+    local SliderBGCorner = Instance.new("UICorner")
+    SliderBGCorner.CornerRadius = UDim.new(0, 4)
+    SliderBGCorner.Parent = SliderBG
+
+    local SliderFill = Instance.new("Frame")
+    SliderFill.Size = UDim2.new(0.666, 0, 1, 0)  -- 1000/1500 = ~0.666
+    SliderFill.Position = UDim2.new(0, 0, 0, 0)
+    SliderFill.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+    SliderFill.BorderSizePixel = 0
+    SliderFill.Parent = SliderBG
+
+    local SliderFillCorner = Instance.new("UICorner")
+    SliderFillCorner.CornerRadius = UDim.new(0, 4)
+    SliderFillCorner.Parent = SliderFill
+
+    local SliderKnob = Instance.new("TextButton")
+    SliderKnob.Size = UDim2.new(0, 16, 0, 16)
+    SliderKnob.Position = UDim2.new(0.666, -8, 0.5, -8)
+    SliderKnob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    SliderKnob.BorderSizePixel = 0
+    SliderKnob.Text = ""
+    SliderKnob.Parent = SliderBG
+
+    local SliderKnobCorner = Instance.new("UICorner")
+    SliderKnobCorner.CornerRadius = UDim.new(1, 0)
+    SliderKnobCorner.Parent = SliderKnob
+
+    local MinLabel = Instance.new("TextLabel")
+    MinLabel.Size = UDim2.new(0, 30, 0, 15)
+    MinLabel.Position = UDim2.new(0.05, 0, 0, 38)
+    MinLabel.BackgroundTransparency = 1
+    MinLabel.Text = "10"
+    MinLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+    MinLabel.TextSize = 9
+    MinLabel.Font = Enum.Font.Gotham
+    MinLabel.Parent = SliderContainer
+
+    local MaxLabel = Instance.new("TextLabel")
+    MaxLabel.Size = UDim2.new(0, 30, 0, 15)
+    MaxLabel.Position = UDim2.new(0.85, 0, 0, 38)
+    MaxLabel.BackgroundTransparency = 1
+    MaxLabel.Text = "1500"
+    MaxLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+    MaxLabel.TextSize = 9
+    MaxLabel.Font = Enum.Font.Gotham
+    MaxLabel.Parent = SliderContainer
+
+    -- Status e Info
+    local StatusLabel = Instance.new("TextLabel")
+    StatusLabel.Size = UDim2.new(0.9, 0, 0, 20)
+    StatusLabel.Position = UDim2.new(0.05, 0, 0, 414)
+    StatusLabel.BackgroundTransparency = 1
+    StatusLabel.Text = "Status: Esperando tiro..."
+    StatusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+    StatusLabel.TextSize = 10
+    StatusLabel.Font = Enum.Font.GothamBold
+    StatusLabel.Parent = MainFrame
+
+    local ModeLabel = Instance.new("TextLabel")
+    ModeLabel.Size = UDim2.new(0.9, 0, 0, 30)
+    ModeLabel.Position = UDim2.new(0.05, 0, 0, 437)
+    ModeLabel.BackgroundTransparency = 1
+    ModeLabel.Text = "MODO: Clique esquerdo para ativar aim"
+    ModeLabel.TextColor3 = Color3.fromRGB(0, 200, 255)
+    ModeLabel.TextSize = 10
+    ModeLabel.Font = Enum.Font.Gotham
+    ModeLabel.TextWrapped = true
+    ModeLabel.Parent = MainFrame
+    
+    -- Label de prioridade (da v1)
+    local PriorityLabel = Instance.new("TextLabel")
+    PriorityLabel.Size = UDim2.new(0.9, 0, 0, 20)
+    PriorityLabel.Position = UDim2.new(0.05, 0, 0, 467)
+    PriorityLabel.BackgroundTransparency = 1
+    PriorityLabel.Text = "🎯 Alvo: Mais central (FOV)"
+    PriorityLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+    PriorityLabel.TextSize = 10
+    PriorityLabel.Font = Enum.Font.GothamBold
+    PriorityLabel.Parent = MainFrame
+
+    local WarningLabel = Instance.new("TextLabel")
+    WarningLabel.Size = UDim2.new(0.9, 0, 0, 25)
+    WarningLabel.Position = UDim2.new(0.05, 0, 0, 545)
+    WarningLabel.BackgroundTransparency = 1
+    WarningLabel.Text = "⚠️ ULTRA FORTE | Smooth: 0.95"
+    WarningLabel.TextColor3 = Color3.fromRGB(255, 200, 0)
+    WarningLabel.TextSize = 10
+    WarningLabel.Font = Enum.Font.Gotham
+    WarningLabel.Parent = MainFrame
+
+    -- FUNÇÃO DO SLIDER
+    local function UpdateSlider(input)
+        local relativeX = math.clamp((input.Position.X - SliderBG.AbsolutePosition.X) / SliderBG.AbsoluteSize.X, 0, 1)
+        local newFOV = math.floor(10 + (relativeX * 1490))
+        
         if AimAssist.PriorityMode == "Distance" then
-            FOV_Circle.Radius = AimAssist.MaxFOVForDistance
+            AimAssist.MaxFOVForDistance = newFOV
+            FOVLabel.Text = "Max FOV Dist: " .. newFOV .. (newFOV >= 1400 and " (MAX)" or newFOV <= 20 and " (MIN)" or "")
         else
-            FOV_Circle.Radius = newFOV 
+            AimAssist.FOV = newFOV
+            FOVLabel.Text = "FOV: " .. newFOV .. (newFOV >= 1400 and " (MAX)" or newFOV <= 20 and " (MIN)" or "")
+        end
+        
+        SliderFill.Size = UDim2.new(relativeX, 0, 1, 0)
+        SliderKnob.Position = UDim2.new(relativeX, -8, 0.5, -8)
+        
+        if FOV_Circle then 
+            if AimAssist.PriorityMode == "Distance" then
+                FOV_Circle.Radius = AimAssist.MaxFOVForDistance
+            else
+                FOV_Circle.Radius = newFOV 
+            end
         end
     end
+
+    -- Eventos do Slider
+    SliderKnob.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            IsDraggingSlider = true
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if IsDraggingSlider and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            UpdateSlider(input)
+        end
+    end)
+
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            IsDraggingSlider = false
+        end
+    end)
+
+    SliderBG.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            UpdateSlider(input)
+        end
+    end)
+
+    -- FUNÇÕES DOS BOTÕES
+    ToggleESP.MouseButton1Click:Connect(function()
+        ESP.Enabled = not ESP.Enabled
+        ToggleESP.Text = "ESP: " .. (ESP.Enabled and "ON" or "OFF")
+        ToggleESP.BackgroundColor3 = ESP.Enabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(200, 50, 50)
+    end)
+
+    ToggleAim.MouseButton1Click:Connect(function()
+        AimAssist.Enabled = not AimAssist.Enabled
+        ToggleAim.Text = "AIM ASSIST: " .. (AimAssist.Enabled and "ON 🔥" or "OFF")
+        ToggleAim.BackgroundColor3 = AimAssist.Enabled and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(200, 50, 50)
+        if AimAssist.Enabled then
+            Title.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+            wait(0.2)
+            Title.BackgroundColor3 = Color3.fromRGB(180, 0, 0)
+        end
+    end)
+
+    ToggleShootMode.MouseButton1Click:Connect(function()
+        AimAssist.ShootToActivate = not AimAssist.ShootToActivate
+        if AimAssist.ShootToActivate then
+            ToggleShootMode.Text = "ON SHOOT ONLY: ON 🎯"
+            ToggleShootMode.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
+            ModeLabel.Text = "MODO: Clique esquerdo para ativar aim"
+            ModeLabel.TextColor3 = Color3.fromRGB(0, 255, 100)
+        else
+            ToggleShootMode.Text = "ALWAYS ON: ON ⚡"
+            ToggleShootMode.BackgroundColor3 = Color3.fromRGB(255, 100, 0)
+            ModeLabel.Text = "MODO: Sempre ativo quando ligado"
+            ModeLabel.TextColor3 = Color3.fromRGB(255, 200, 0)
+        end
+    end)
+
+    ToggleMagnet.MouseButton1Click:Connect(function()
+        AimAssist.MagnetMode = not AimAssist.MagnetMode
+        ToggleMagnet.Text = "MAGNET: " .. (AimAssist.MagnetMode and "ON 🧲" or "OFF")
+        ToggleMagnet.BackgroundColor3 = AimAssist.MagnetMode and Color3.fromRGB(255, 0, 255) or Color3.fromRGB(150, 0, 150)
+    end)
+
+    ToggleLock.MouseButton1Click:Connect(function()
+        AimAssist.LockTarget = not AimAssist.LockTarget
+        ToggleLock.Text = "LOCK: " .. (AimAssist.LockTarget and "ON 🔒" or "OFF")
+        ToggleLock.BackgroundColor3 = AimAssist.LockTarget and Color3.fromRGB(255, 255, 0) or Color3.fromRGB(100, 100, 0)
+    end)
+
+    ToggleTeamESP.MouseButton1Click:Connect(function()
+        ESP.TeamCheck = not ESP.TeamCheck
+        ToggleTeamESP.Text = "Team ESP: " .. (ESP.TeamCheck and "ON" or "OFF")
+        ToggleTeamESP.BackgroundColor3 = ESP.TeamCheck and Color3.fromRGB(50, 150, 50) or Color3.fromRGB(70, 70, 70)
+    end)
+
+    ToggleTeamAim.MouseButton1Click:Connect(function()
+        AimAssist.TeamCheck = not AimAssist.TeamCheck
+        ToggleTeamAim.Text = "Team Aim: " .. (AimAssist.TeamCheck and "ON" or "OFF")
+        ToggleTeamAim.BackgroundColor3 = AimAssist.TeamCheck and Color3.fromRGB(50, 150, 50) or Color3.fromRGB(50, 150, 50)
+    end)
+
+    ToggleWallCheck.MouseButton1Click:Connect(function()
+        AimAssist.WallCheck = not AimAssist.WallCheck
+        ToggleWallCheck.Text = "Wall Check: " .. (AimAssist.WallCheck and "ON" or "OFF")
+        ToggleWallCheck.BackgroundColor3 = AimAssist.WallCheck and Color3.fromRGB(50, 150, 50) or Color3.fromRGB(70, 70, 70)
+    end)
+    
+    -- Botão de Prioridade (da v1)
+    TogglePriority.MouseButton1Click:Connect(function()
+        if AimAssist.PriorityMode == "FOV" then
+            AimAssist.PriorityMode = "Distance"
+            TogglePriority.Text = "PRIORITY: DISTANCE"
+            TogglePriority.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
+            PriorityLabel.Text = "🎯 Alvo: Mais próximo (3D)"
+            PriorityLabel.TextColor3 = Color3.fromRGB(0, 255, 255)
+            -- Atualiza slider para MaxFOVForDistance
+            local relativeX = math.clamp((AimAssist.MaxFOVForDistance - 10) / 1490, 0, 1)
+            SliderFill.Size = UDim2.new(relativeX, 0, 1, 0)
+            SliderKnob.Position = UDim2.new(relativeX, -8, 0.5, -8)
+            FOVLabel.Text = "Max FOV Dist: " .. AimAssist.MaxFOVForDistance
+        else
+            AimAssist.PriorityMode = "FOV"
+            TogglePriority.Text = "PRIORITY: FOV (CENTER)"
+            TogglePriority.BackgroundColor3 = Color3.fromRGB(255, 100, 0)
+            PriorityLabel.Text = "🎯 Alvo: Mais central (tela)"
+            PriorityLabel.TextColor3 = Color3.fromRGB(255, 200, 0)
+            -- Atualiza slider para FOV
+            local relativeX = math.clamp((AimAssist.FOV - 10) / 1490, 0, 1)
+            SliderFill.Size = UDim2.new(relativeX, 0, 1, 0)
+            SliderKnob.Position = UDim2.new(relativeX, -8, 0.5, -8)
+            FOVLabel.Text = "FOV: " .. AimAssist.FOV
+        end
+    end)
+
+    -- Função esconder/mostrar painel (da v2)
+    TogglePanel.MouseButton1Click:Connect(function()
+        IsPanelVisible = not IsPanelVisible
+        
+        local elementsToToggle = {
+            ToggleESP, ToggleAim, ToggleShootMode, ToggleMagnet, 
+            ToggleLock, ToggleTeamESP, ToggleTeamAim, ToggleWallCheck, TogglePriority,
+            SliderContainer, StatusLabel, ModeLabel, PriorityLabel, WarningLabel
+        }
+        
+        for _, element in ipairs(elementsToToggle) do
+            if element and element:IsA("GuiObject") then
+                element.Visible = IsPanelVisible
+            end
+        end
+        
+        if IsPanelVisible then
+            MainFrame.Size = UDim2.new(0, 280, 0, 580)
+            TogglePanel.Position = UDim2.new(0.05, 0, 0, 328)
+            TogglePanel.Text = "HIDE PANEL 👁️"
+            TogglePanel.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+            Title.Text = "🔥 AIM ASSIST ULTRA 🔥"
+        else
+            MainFrame.Size = UDim2.new(0, 280, 0, 70)
+            TogglePanel.Position = UDim2.new(0.05, 0, 0, 40)
+            TogglePanel.Text = "SHOW PANEL 👁️‍🗨️"
+            TogglePanel.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
+            Title.Text = "🔥 MENU 🔥"
+        end
+    end)
+
+    -- Loop de atualização do Status
+    RunService.RenderStepped:Connect(function()
+        if CurrentTarget and IsShooting then
+            StatusLabel.Text = "Status: ATIRANDO em " .. CurrentTarget.Name
+            StatusLabel.TextColor3 = Color3.fromRGB(255, 0, 0)
+        elseif CurrentTarget then
+            StatusLabel.Text = "Status: 🎯 " .. CurrentTarget.Name
+            StatusLabel.TextColor3 = Color3.fromRGB(255, 255, 0)
+        elseif AimAssist.Enabled and AimAssist.ShootToActivate then
+            StatusLabel.Text = "Status: Esperando tiro..."
+            StatusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+        elseif AimAssist.Enabled then
+            StatusLabel.Text = "Status: Sempre Ativo"
+            StatusLabel.TextColor3 = Color3.fromRGB(255, 255, 0)
+        else
+            StatusLabel.Text = "Status: Desativado"
+            StatusLabel.TextColor3 = Color3.fromRGB(100, 100, 100)
+        end
+    end)
 end
 
--- Eventos do slider
-SliderKnob.InputBegan:Connect(function(input)
+-- FOV Circle (da v2)
+FOV_Circle = Drawing.new("Circle")
+FOV_Circle.Visible = false
+FOV_Circle.Thickness = 2
+FOV_Circle.NumSides = 64
+FOV_Circle.Radius = AimAssist.FOV
+FOV_Circle.Filled = false
+FOV_Circle.Transparency = 0.3
+FOV_Circle.Color = Color3.fromRGB(255, 0, 0)
+
+-- Loop principal (da v2)
+if Connection then Connection:Disconnect() end
+Connection = RunService.RenderStepped:Connect(function()
+    pcall(function()
+        ApplyAimAssist()
+        UpdateESP()
+    end)
+end)
+
+-- Eventos de jogadores
+for _, player in pairs(Players:GetPlayers()) do
+    if player ~= LocalPlayer then
+        CreateESP(player)
+    end
+end
+
+Players.PlayerAdded:Connect(function(player)
+    wait(1)
+    CreateESP(player)
+end)
+
+Players.PlayerRemoving:Connect(RemoveESP)
+
+-- Sistema de detecção de tiro ULTRA (da v2)
+Mouse.Button1Down:Connect(function()
+    IsShooting = true
+    LastClickTime = tick()
+end)
+
+Mouse.Button1Up:Connect(function()
+    IsShooting = false
+    LockedTarget = nil
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        IsDraggingSlider = true
+        IsShooting = true
+        LastClickTime = tick()
+    end
+    
+    if input.UserInputType == Enum.UserInputType.Touch then
+        IsShooting = true
+        LastClickTime = tick()
+    end
+    
+    if input.KeyCode == Enum.KeyCode.Space or input.KeyCode == Enum.KeyCode.Q then
+        IsShooting = true
+        LastClickTime = tick()
     end
 end)
 
-UserInputService.InputChanged:Connect(function(input)
-    if IsDraggingSlider and input.UserInputType == Enum.UserInputType.MouseMovement then
-        UpdateSlider(input)
+UserInputService.InputEnded:Connect(function(input, gameProcessed)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        IsShooting = false
+        LockedTarget = nil
+    end
+    
+    if input.UserInputType == Enum.UserInputType.Touch then
+        IsShooting = false
+        LockedTarget = nil
+    end
+    
+    if input.KeyCode == Enum.KeyCode.Space or input.KeyCode == Enum.KeyCode.Q then
+        IsShooting = false
+        LockedTarget = nil
+    end
+end)
+
+-- Check contínuo (da v2)
+spawn(function()
+    while wait(0.05) do
+        if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+            if not IsShooting then
+                IsShooting = true
+            end
+        else
+            if IsShooting then
+                IsShooting = false
+                LockedTarget = nil
+            end
+        end
+        
+        if IsShooting and (tick() - LastClickTime) > 3 then
+            IsShooting = false
+            LockedTarget = nil
+        end
+    end
+end)
+
+-- Teclas de atalho (da v2)
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    
+    -- Insert para esconder/mostrar painel
+    if input.KeyCode == Enum.KeyCode.Insert then
+        if ScreenGui and ScreenGui:FindFirstChildOfClass("Frame") then
+            local mainFrame = ScreenGui:FindFirstChildOfClass("Frame")
+            local toggleBtn = mainFrame:FindFirstChild("TextButton", 9) -- Aproximadamente o botão de toggle
+            if toggleBtn then
+                toggleBtn.MouseButton1Click:Fire()
+            end
+        end
+    end
+    
+    -- F para ativar aim temporariamente
+    if input.KeyCode == Enum.KeyCode.F then
+        if AimAssist.ShootToActivate then
+            IsShooting = true
+        else
+            AimAssist.Enabled = true
+        end
     end
 end)
 
 UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        IsDraggingSlider = false
+    if input.KeyCode == Enum.KeyCode.F then
+        if AimAssist.ShootToActivate then
+            IsShooting = false
+            LockedTarget = nil
+        else
+            AimAssist.Enabled = false
+            LockedTarget = nil
+        end
     end
 end)
 
-SliderBG.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        UpdateSlider(input)
+-- Respawn handler
+LocalPlayer.CharacterAdded:Connect(function()
+    wait(2)
+    UpdateReferences()
+    for _, player in pairs(Players:GetPlayers()) do
+        if not ESPObjects[player] then
+            CreateESP(player)
+        end
     end
 end)
 
--- Funções botões
-ToggleESP.MouseButton1Click:Connect(function()
-    ESP.Enabled = not ESP.Enabled
-    ToggleESP.Text = "ESP: " .. (ESP.Enabled and "ON" or "OFF")
-    ToggleESP.BackgroundColor3 = ESP.Enabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(200, 50, 50)
-end)
+-- Criar GUI
+CreateGUI()
 
-ToggleAim.MouseButton1Click:Connect(function()
-    AimAssist.Enabled = not AimAssist.Enabled
-    ToggleAim.Text = "AIM ASSIST: " .. (AimAssist.Enabled and "ON 🔥" or "OFF")
-    ToggleAim.BackgroundColor3 = AimAssist.Enabled and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(200, 50, 50)
-    if AimAssist.Enabled then
-        Title.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
-        wait(0.2)
-        Title.BackgroundColor3 = Color3.fromRGB(180, 0, 0)
-    end
-end)
-
-ToggleShootMode.MouseButton1Click:Connect(function()
-    AimAssist.ShootToActivate = not AimAssist.ShootToActivate
-    if AimAssist.ShootToActivate then
-        ToggleShootMode.Text = "ON SHOOT ONLY: ON 🎯"
-        ToggleShootMode.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
-        ModeLabel.Text = "MODO: Clique esquerdo para ativar aim"
-        ModeLabel.TextColor3 = Color3.fromRGB(0, 255, 100)
-    else
-        ToggleShootMode.Text = "ALWAYS ON: ON ⚡"
-        ToggleShootMode.BackgroundColor3 = Color3.fromRGB(255, 100, 0)
-        ModeLabel.Text = "MODO: Sempre ativo quando ligado"
-        ModeLabel.TextColor3 = Color3.fromRGB(255, 200, 0)
-    end
-end)
-
-ToggleMagnet.MouseButton1Click:Connect(function()
-    AimAssist.MagnetMode = not AimAssist.MagnetMode
-    ToggleMagnet.Text = "MAGNET: " .. (AimAssist.MagnetMode and "ON 🧲" or "OFF")
-    ToggleMagnet.BackgroundColor3 = AimAssist.MagnetMode and Color3.fromRGB(255, 0, 255) or Color3.fromRGB(150, 0, 150)
-end)
-
-ToggleLock.MouseButton1Click:Connect(function()
-    AimAssist.LockTarget = not AimAssist.LockTarget
-    ToggleLock.Text = "LOCK: " .. (AimAssist.LockTarget and "ON 🔒" or "OFF")
-    ToggleLock.BackgroundColor3 = AimAssist.LockTarget and Color3.fromRGB(255, 255, 0) or Color3.fromRGB(100, 100, 0)
-end)
-
-ToggleTeamESP.MouseButton1Click:Connect(function()
-    ESP.TeamCheck = not ESP.TeamCheck
-    ToggleTeamESP.Text = "Team ESP: " .. (ESP.TeamCheck and "ON" or "OFF")
-    ToggleTeamESP.BackgroundColor3 = ESP.TeamCheck and Color3.fromRGB(50, 150, 50) or Color3.fromRGB(70, 70, 70)
-end)
-
-ToggleTeamAim.MouseButton1Click:Connect(function()
-    AimAssist.TeamCheck = not AimAssist.TeamCheck
-    ToggleTeamAim.Text = "Team Aim: " .. (AimAssist.TeamCheck and "ON" or "OFF")
-    ToggleTeamAim.BackgroundColor3 = AimAssist.TeamCheck and Color3.fromRGB(50, 150, 50) or Color3.fromRGB(50, 150, 50)
-end)
-
-ToggleWallCheck.MouseButton1Click:Connect(function()
-    AimAssist.WallCheck = not AimAssist.WallCheck
-    ToggleWallCheck.Text = "Wall Check: " .. (AimAssist.WallCheck and "ON" or "OFF")
-    ToggleWallCheck.BackgroundColor3 = AimAssist.WallCheck and Color3.fromRGB(50, 150, 50) or Color3.fromRGB(70, 70, 70)
-end)
-
-TogglePriority.MouseButton1Click:Connect(function()
-    if AimAssist.PriorityMode == "Distance" then
-        AimAssist.PriorityMode = "FOV"
-        TogglePriority.Text = "PRIORITY: FOV (CENTER)"
-        TogglePriority.BackgroundColor3 = Color3.fromRGB(255, 100, 0)
-        PriorityLabel.Text = "🎯 Alvo: Mais central (tela)"
-        PriorityLabel.TextColor3 = Color3.fromRGB(255, 200, 0)
-        local relativeX = math.clamp((AimAssist.FOV - 10) / 1490, 0, 1)
-        SliderFill.Size = UDim2.new(relativeX, 0, 1, 0)
-        SliderKnob.Position = UDim2.new(relativeX, -8, 0.5, -8)
-        FOVLabel.Text = "FOV: " .. AimAssist.FOV
-    else
-        AimAssist.PriorityMode = "Distance"
-        TogglePriority.Text = "PRIORITY: DISTANCE"
-        TogglePriority.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
-        PriorityLabel.Text = "🎯 Alvo: Mais próximo (3D)"
-        PriorityLabel.TextColor3 = Color3.fromRGB(0, 255, 255)
-        local relativeX = math.clamp((AimAssist.MaxFOVForDistance - 10) / 1490, 0, 1)
-        SliderFill.Size = UDim2.new(relativeX, 0, 1, 0)
-        SliderKnob.Position = UDim2.new(relativeX, -8, 0.5, -8)
-        FOVLabel.Text = "Max FOV Dist: " .. AimAssist.MaxFOVForDistance
-    end
-end)
-
--- 👻 Função do botão de invisibilidade (CLIENT-SIDE)
-ToggleInvis.MouseButton1Click:Connect(function()
-    local isInvisible = ToggleInvisibility()
-    if isInvisible then
-        ToggleInvis.Text = "INVISIBILITY: ON 👻"
-        ToggleInvis.BackgroundColor3 = Color3.fromRGB(200, 0, 255)
-        InvisLabel.Text = "👻 Visibilidade: Invisível (só para você)"
-        InvisLabel.TextColor3 = Color3.fromRGB(255, 100, 255)
-    else
-        ToggleInvis.Text = "INVISIBILITY: OFF"
-        ToggleInvis.BackgroundColor3 = Color3.fromRGB(100, 0, 150)
-        InvisLabel.Text = "👻 Visibilidade: Normal"
-        InvisLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-    end
-end)
-
--- Função do botão esconder/mostrar painel
-Toggle
+-- Inicialização
+print("=== 🔥 AIM ASSIST ULTRA - VERSÃO FINAL MESCLADA 🔥 ===")
+print("FORÇA: ULTRA (0.95 smoothness / 0.99 snap)")
+print("MODO: " .. (AimAssist.ShootToActivate and "ATIVA AO ATIRAR" or "SEMPRE ATIVO"))
+print("PRIORIDADE: " .. AimAssist.PriorityMode)
+print("TECLAS: [Insert] Esconder/Mostrar | [F] Aim Temporário | [Q/Espaço] Atirar")
+print("SLIDER FOV: 10 a 1500 (arraste para ajustar)")
