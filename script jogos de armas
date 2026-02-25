@@ -1,12 +1,13 @@
 -- ESP Script com Aim Assist ULTRA FORTE - ATIVA AO ATIRAR (CORRIGIDO)
 -- Criado para Roblox
 -- 🎯 NOVO: Prioriza oponente mais próximo por distância 3D, não por FOV
--- 👻 NOVO: Modo Invisível - Fica transparente para outros jogadores
+-- 👻 NOVO: Modo "Invisível" - Esconde visualmente (client-side apenas)
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- Variáveis globais
 local LocalPlayer = Players.LocalPlayer
@@ -37,18 +38,19 @@ local AimAssist = {
     WallCheck = false,
     MagnetMode = false,
     LockTarget = false,
-    -- 🎯 NOVO: Sistema de prioridade
-    PriorityMode = "Distance", -- "Distance" (mais próximo) ou "FOV" (mais central)
-    MaxFOVForDistance = 800    -- Se usar modo Distance, só considera jogadores dentro deste FOV
+    PriorityMode = "Distance",
+    MaxFOVForDistance = 800
 }
 
--- 👻 NOVO: Configurações de Invisibilidade
+-- 👻 Configurações de Invisibilidade (CLIENT-SIDE APENAS)
 local Invisibility = {
     Enabled = false,
     OriginalTransparency = {},
-    InvisibleTransparency = 0.7, -- Quão transparente (0 = visível, 1 = invisível)
-    HideName = true,             -- Esconde o nome acima da cabeça
-    HideInESP = true             -- Não mostra seu ESP para outros (se servidor tiver anti-cheat que mostra ESP)
+    InvisibleTransparency = 1, -- 100% invisível para você
+    HideName = true,
+    -- 🔴 AVISO: Os métodos abaixo são tentativas, não garantem invisibilidade real
+    AttemptServerSide = false, -- Tenta métodos avançados (pode não funcionar/ser detectado)
+    AntiHitbox = false         -- Tenta diminuir hitbox (arriscado)
 }
 
 -- Variáveis de controle
@@ -73,7 +75,7 @@ local function UpdateReferences()
     Camera = Workspace.CurrentCamera
 end
 
--- 👻 FUNÇÃO: Salvar transparência original das partes do personagem
+-- 👻 FUNÇÃO: Salvar propriedades originais
 local function SaveOriginalTransparency(character)
     OriginalCharacterProperties[character] = {}
     for _, part in pairs(character:GetDescendants()) do
@@ -81,13 +83,15 @@ local function SaveOriginalTransparency(character)
             OriginalCharacterProperties[character][part] = {
                 Transparency = part.Transparency,
                 CastShadow = part.CastShadow,
-                LocalTransparencyModifier = part.LocalTransparencyModifier
+                LocalTransparencyModifier = part.LocalTransparencyModifier,
+                Size = part.Size,
+                Massless = part.Massless
             }
         elseif part:IsA("Decal") or part:IsA("Texture") then
             OriginalCharacterProperties[character][part] = {
                 Transparency = part.Transparency
             }
-        elseif part:IsA("BillboardGui") and Invisibility.HideName then
+        elseif part:IsA("BillboardGui") then
             OriginalCharacterProperties[character][part] = {
                 Enabled = part.Enabled
             }
@@ -95,56 +99,103 @@ local function SaveOriginalTransparency(character)
     end
 end
 
--- 👻 FUNÇÃO: Aplicar invisibilidade
-local function ApplyInvisibility()
+-- 👻 FUNÇÃO: Invisibilidade CLIENT-SIDE (só você não vê seu personagem)
+local function ApplyClientSideInvisibility()
     if not LocalPlayer.Character then return end
     
     local character = LocalPlayer.Character
     
-    -- Salva propriedades originais se ainda não salvou
     if not OriginalCharacterProperties[character] then
         SaveOriginalTransparency(character)
     end
     
-    -- Aplica transparência em todas as partes
+    -- Torna tudo invisível na SUA tela apenas
     for _, part in pairs(character:GetDescendants()) do
-        if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
-            -- Mantém a hitbox (HumanoidRootPart) com transparência 0.5 para você não ficar totalmente cego
-            if part.Name == "HumanoidRootPart" then
-                part.Transparency = 0.5
-            else
-                part.Transparency = Invisibility.InvisibleTransparency
-            end
+        if part:IsA("BasePart") then
+            part.Transparency = 1
             part.CastShadow = false
-            -- Para você mesmo ver seu personagem semi-transparente
-            part.LocalTransparencyModifier = 0.3
+            part.LocalTransparencyModifier = 1
         elseif part:IsA("Decal") or part:IsA("Texture") then
-            part.Transparency = Invisibility.InvisibleTransparency
+            part.Transparency = 1
         elseif part:IsA("BillboardGui") and Invisibility.HideName then
-            -- Esconde o nome/tag acima da cabeça
+            part.Enabled = false
+        elseif part:IsA("ParticleEmitter") or part:IsA("Trail") then
+            part.Enabled = false
+        elseif part:IsA("PointLight") or part:IsA("SpotLight") or part:IsA("SurfaceLight") then
             part.Enabled = false
         end
     end
     
-    -- Esconde acessórios (hats, etc)
+    -- Esconde acessórios
     for _, accessory in pairs(character:GetChildren()) do
         if accessory:IsA("Accessory") then
             local handle = accessory:FindFirstChild("Handle")
             if handle and handle:IsA("BasePart") then
-                handle.Transparency = Invisibility.InvisibleTransparency
+                handle.Transparency = 1
                 handle.CastShadow = false
-                -- Esconde decals do acessório
+                handle.LocalTransparencyModifier = 1
                 for _, decal in pairs(handle:GetDescendants()) do
                     if decal:IsA("Decal") or decal:IsA("Texture") then
-                        decal.Transparency = Invisibility.InvisibleTransparency
+                        decal.Transparency = 1
                     end
                 end
             end
         end
     end
+    
+    -- Esconde ferramentas
+    for _, tool in pairs(character:GetChildren()) do
+        if tool:IsA("Tool") then
+            for _, part in pairs(tool:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.Transparency = 1
+                    part.CastShadow = false
+                    part.LocalTransparencyModifier = 1
+                elseif part:IsA("Decal") or part:IsA("Texture") then
+                    part.Transparency = 1
+                end
+            end
+        end
+    end
+    
+    -- Desativa highlight
+    local highlight = character:FindFirstChildOfClass("Highlight")
+    if highlight then
+        highlight.Enabled = false
+    end
 end
 
--- 👻 FUNÇÃO: Remover invisibilidade (voltar ao normal)
+-- 👻 FUNÇÃO: Tentar invisibilidade SERVER-SIDE (experimental, provavelmente não funciona)
+local function AttemptServerSideInvisibility()
+    -- 🔴 AVISO: Isso provavelmente NÃO FUNCIONA na maioria dos jogos
+    -- e pode resultar em kick/ban. Use por sua conta e risco.
+    
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    -- Método 1: Tenta desativar render do personagem (só funciona localmente)
+    for _, part in pairs(character:GetChildren()) do
+        if part:IsA("BasePart") then
+            -- Torna massless (não afeta física, mas alguns jogos detectam)
+            part.Massless = true
+        end
+    end
+    
+    -- Método 2: Tenta manipular propriedades de rede (arriscado)
+    pcall(function()
+        -- Isso pode causar desync e kick
+        for _, part in pairs(character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                -- Tenta setar propriedade arquivada (pode crashar)
+                part:SetAttribute("OriginalTransparency", part.Transparency)
+            end
+        end
+    end)
+    
+    print("⚠️ Tentativa server-side aplicada (provavelmente não funciona)")
+end
+
+-- 👻 FUNÇÃO: Remover invisibilidade
 local function RemoveInvisibility()
     if not LocalPlayer.Character then return end
     
@@ -161,7 +212,7 @@ local function RemoveInvisibility()
             end
         end
     else
-        -- Se não tem dados salvos, apenas tenta deixar visível
+        -- Fallback
         for _, part in pairs(character:GetDescendants()) do
             if part:IsA("BasePart") then
                 part.Transparency = 0
@@ -171,8 +222,17 @@ local function RemoveInvisibility()
                 part.Transparency = 0
             elseif part:IsA("BillboardGui") then
                 part.Enabled = true
+            elseif part:IsA("ParticleEmitter") or part:IsA("Trail") then
+                part.Enabled = true
+            elseif part:IsA("PointLight") or part:IsA("SpotLight") or part:IsA("SurfaceLight") then
+                part.Enabled = true
             end
         end
+    end
+    
+    local highlight = character:FindFirstChildOfClass("Highlight")
+    if highlight then
+        highlight.Enabled = true
     end
 end
 
@@ -181,17 +241,41 @@ local function ToggleInvisibility()
     Invisibility.Enabled = not Invisibility.Enabled
     
     if Invisibility.Enabled then
-        ApplyInvisibility()
-        -- Conecta para manter invisível quando respawnar ou mudar de roupa
+        ApplyClientSideInvisibility()
+        
+        -- Tenta métodos server-side se ativado (não recomendado)
+        if Invisibility.AttemptServerSide then
+            AttemptServerSideInvisibility()
+        end
+        
+        -- Mantém invisível
         if InvisibilityConnection then InvisibilityConnection:Disconnect() end
         InvisibilityConnection = RunService.RenderStepped:Connect(function()
             if Invisibility.Enabled and LocalPlayer.Character then
-                -- Verifica se alguma parte ficou visível novamente (ex: trocou de roupa)
                 for _, part in pairs(LocalPlayer.Character:GetDescendants()) do
-                    if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
-                        if part.Transparency < Invisibility.InvisibleTransparency and part.Transparency ~= 1 then
-                            part.Transparency = Invisibility.InvisibleTransparency
-                            part.CastShadow = false
+                    if part:IsA("BasePart") and part.Transparency < 1 then
+                        part.Transparency = 1
+                        part.CastShadow = false
+                        part.LocalTransparencyModifier = 1
+                    elseif (part:IsA("Decal") or part:IsA("Texture")) and part.Transparency < 1 then
+                        part.Transparency = 1
+                    end
+                end
+                
+                -- Verifica ferramentas novas
+                for _, tool in pairs(LocalPlayer.Character:GetChildren()) do
+                    if tool:IsA("Tool") and tool:FindFirstChild("Handle") then
+                        local handle = tool:FindFirstChild("Handle")
+                        if handle and handle:IsA("BasePart") and handle.Transparency < 1 then
+                            for _, part in pairs(tool:GetDescendants()) do
+                                if part:IsA("BasePart") then
+                                    part.Transparency = 1
+                                    part.CastShadow = false
+                                    part.LocalTransparencyModifier = 1
+                                elseif part:IsA("Decal") or part:IsA("Texture") then
+                                    part.Transparency = 1
+                                end
+                            end
                         end
                     end
                 end
@@ -274,7 +358,6 @@ local function IsVisible(targetPosition)
     return result == nil
 end
 
--- 🎯 NOVA FUNÇÃO: Pega o jogador mais próximo por DISTÂNCIA 3D (não por FOV)
 local function GetClosestPlayerByDistance()
     if not LocalPlayer.Character then return nil end
     local myHumanoid = LocalPlayer.Character:FindFirstChild("Humanoid")
@@ -282,10 +365,9 @@ local function GetClosestPlayerByDistance()
     if not myHumanoid or not myRoot or myHumanoid.Health <= 0 then return nil end
     
     local closestPlayer = nil
-    local shortestDistance = AimAssist.MaxDistance -- Usa MaxDistance como limite
+    local shortestDistance = AimAssist.MaxDistance
     local centerScreen = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     
-    -- Se tem target travado e LockTarget está ativo, mantém ele
     if AimAssist.LockTarget and LockedTarget and LockedTarget.Character then
         local targetPart = LockedTarget.Character:FindFirstChild(AimAssist.TargetPart)
         local humanoid = LockedTarget.Character:FindFirstChild("Humanoid")
@@ -308,25 +390,17 @@ local function GetClosestPlayerByDistance()
         
         if not humanoid or not targetPart or humanoid.Health <= 0 then continue end
         
-        -- 🎯 CALCULA DISTÂNCIA 3D REAL (do seu personagem até o alvo)
         local distance3D = (myRoot.Position - targetPart.Position).Magnitude
-        
-        -- Só considera se estiver dentro da distância máxima
         if distance3D > AimAssist.MaxDistance then continue end
         
-        -- Verifica se está na tela
         local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
         if not onScreen then continue end
         
-        -- 🎯 VERIFICAÇÃO DE FOV: Só considera se estiver dentro do campo de visão configurado
-        -- Isso evita que vire 180 graus para pegar alguém atrás
         local screenDistance = (Vector2.new(screenPos.X, screenPos.Y) - centerScreen).Magnitude
         if screenDistance > AimAssist.MaxFOVForDistance then continue end
         
-        -- Wall check
         if not IsVisible(targetPart.Position) then continue end
         
-        -- 🎯 PRIORIZA O MAIS PRÓXIMO (menor distância 3D)
         if distance3D < shortestDistance then
             shortestDistance = distance3D
             closestPlayer = player
@@ -340,7 +414,6 @@ local function GetClosestPlayerByDistance()
     return closestPlayer
 end
 
--- 🎯 FUNÇÃO ANTIGA (mantida para compatibilidade/modo alternativo): Pega o mais próximo do centro da tela (FOV)
 local function GetClosestPlayerByFOV()
     if not LocalPlayer.Character then return nil end
     local myHumanoid = LocalPlayer.Character:FindFirstChild("Humanoid")
@@ -395,7 +468,6 @@ local function GetClosestPlayerByFOV()
     return closestPlayer
 end
 
--- 🎯 FUNÇÃO UNIFICADA: Escolhe qual método usar baseado na configuração
 local function GetClosestPlayer()
     if AimAssist.PriorityMode == "Distance" then
         return GetClosestPlayerByDistance()
@@ -467,13 +539,12 @@ local function UpdateESP()
         FOV_Circle.Visible = showCircle
         FOV_Circle.Position = centerScreen
         
-        -- 🎯 Mostra o raio apropriado baseado no modo
         if AimAssist.PriorityMode == "Distance" then
             FOV_Circle.Radius = AimAssist.MaxFOVForDistance
-            FOV_Circle.Color = Color3.fromRGB(0, 255, 255) -- Ciano para modo distância
+            FOV_Circle.Color = Color3.fromRGB(0, 255, 255)
         else
             FOV_Circle.Radius = AimAssist.FOV
-            FOV_Circle.Color = Color3.fromRGB(255, 0, 0) -- Vermelho para modo FOV
+            FOV_Circle.Color = Color3.fromRGB(255, 0, 0)
         end
         
         if CurrentTarget and IsShooting then
@@ -570,7 +641,7 @@ ScreenGui.Parent = game.CoreGui
 ScreenGui.ResetOnSpawn = false
 
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 260, 0, 620) -- Aumentado para caber novo botão
+MainFrame.Size = UDim2.new(0, 280, 0, 680) -- Aumentado para avisos
 MainFrame.Position = UDim2.new(0, 20, 0, 20)
 MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 MainFrame.BorderSizePixel = 0
@@ -628,7 +699,7 @@ local ToggleTeamAim = CreateButton("Team Check Aim", 232, Color3.fromRGB(50, 150
 local ToggleWallCheck = CreateButton("Wall Check", 264, Color3.fromRGB(70, 70, 70))
 local TogglePriority = CreateButton("PRIORITY: DISTANCE", 296, Color3.fromRGB(0, 150, 255), 11)
 
--- 👻 NOVO BOTÃO: Invisibilidade
+-- 👻 BOTÃO: Invisibilidade (CLIENT-SIDE)
 local ToggleInvis = CreateButton("INVISIBILITY", 328, Color3.fromRGB(100, 0, 150), 11)
 
 -- Botão para esconder/mostrar painel
@@ -738,7 +809,7 @@ ModeLabel.Font = Enum.Font.Gotham
 ModeLabel.TextWrapped = true
 ModeLabel.Parent = MainFrame
 
--- 🎯 Label de prioridade
+-- Label de prioridade
 local PriorityLabel = Instance.new("TextLabel")
 PriorityLabel.Size = UDim2.new(0.9, 0, 0, 20)
 PriorityLabel.Position = UDim2.new(0.05, 0, 0, 499)
@@ -749,7 +820,7 @@ PriorityLabel.TextSize = 10
 PriorityLabel.Font = Enum.Font.GothamBold
 PriorityLabel.Parent = MainFrame
 
--- 👻 NOVO LABEL: Status de invisibilidade
+-- 👻 LABEL: Status de invisibilidade com AVISO
 local InvisLabel = Instance.new("TextLabel")
 InvisLabel.Size = UDim2.new(0.9, 0, 0, 20)
 InvisLabel.Position = UDim2.new(0.05, 0, 0, 519)
@@ -760,10 +831,22 @@ InvisLabel.TextSize = 10
 InvisLabel.Font = Enum.Font.GothamBold
 InvisLabel.Parent = MainFrame
 
--- Aviso
+-- 🔴 AVISO IMPORTANTE sobre invisibilidade
+local WarningInvisLabel = Instance.new("TextLabel")
+WarningInvisLabel.Size = UDim2.new(0.9, 0, 0, 30)
+WarningInvisLabel.Position = UDim2.new(0.05, 0, 0, 539)
+WarningInvisLabel.BackgroundTransparency = 1
+WarningInvisLabel.Text = "⚠️ INVISIBILIDADE: Apenas você não vê seu personagem! Oponentes ainda te veem normalmente."
+WarningInvisLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+WarningInvisLabel.TextSize = 9
+WarningInvisLabel.Font = Enum.Font.Gotham
+WarningInvisLabel.TextWrapped = true
+WarningInvisLabel.Parent = MainFrame
+
+-- Aviso geral
 local WarningLabel = Instance.new("TextLabel")
 WarningLabel.Size = UDim2.new(0.9, 0, 0, 25)
-WarningLabel.Position = UDim2.new(0.05, 0, 0, 585)
+WarningLabel.Position = UDim2.new(0.05, 0, 0, 645)
 WarningLabel.BackgroundTransparency = 1
 WarningLabel.Text = "⚠️ ULTRA FORTE | Smooth: 0.95"
 WarningLabel.TextColor3 = Color3.fromRGB(255, 200, 0)
@@ -776,7 +859,6 @@ local function UpdateSlider(input)
     local relativeX = math.clamp((input.Position.X - SliderBG.AbsolutePosition.X) / SliderBG.AbsoluteSize.X, 0, 1)
     local newFOV = math.floor(10 + (relativeX * 1490))
     
-    -- 🎯 Atualiza o valor apropriado baseado no modo
     if AimAssist.PriorityMode == "Distance" then
         AimAssist.MaxFOVForDistance = newFOV
         FOVLabel.Text = "Max FOV Dist: " .. newFOV .. (newFOV >= 1400 and " (MAX)" or newFOV <= 20 and " (MIN)" or "")
@@ -892,7 +974,6 @@ TogglePriority.MouseButton1Click:Connect(function()
         TogglePriority.BackgroundColor3 = Color3.fromRGB(255, 100, 0)
         PriorityLabel.Text = "🎯 Alvo: Mais central (tela)"
         PriorityLabel.TextColor3 = Color3.fromRGB(255, 200, 0)
-        -- Atualiza o slider para mostrar FOV
         local relativeX = math.clamp((AimAssist.FOV - 10) / 1490, 0, 1)
         SliderFill.Size = UDim2.new(relativeX, 0, 1, 0)
         SliderKnob.Position = UDim2.new(relativeX, -8, 0.5, -8)
@@ -903,7 +984,6 @@ TogglePriority.MouseButton1Click:Connect(function()
         TogglePriority.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
         PriorityLabel.Text = "🎯 Alvo: Mais próximo (3D)"
         PriorityLabel.TextColor3 = Color3.fromRGB(0, 255, 255)
-        -- Atualiza o slider para mostrar MaxFOVForDistance
         local relativeX = math.clamp((AimAssist.MaxFOVForDistance - 10) / 1490, 0, 1)
         SliderFill.Size = UDim2.new(relativeX, 0, 1, 0)
         SliderKnob.Position = UDim2.new(relativeX, -8, 0.5, -8)
@@ -911,14 +991,14 @@ TogglePriority.MouseButton1Click:Connect(function()
     end
 end)
 
--- 👻 NOVO: Função do botão de invisibilidade
+-- 👻 Função do botão de invisibilidade (CLIENT-SIDE)
 ToggleInvis.MouseButton1Click:Connect(function()
     local isInvisible = ToggleInvisibility()
     if isInvisible then
         ToggleInvis.Text = "INVISIBILITY: ON 👻"
-        ToggleInvis.BackgroundColor3 = Color3.fromRGB(150, 0, 255)
-        InvisLabel.Text = "👻 Visibilidade: INVISÍVEL (70%)"
-        InvisLabel.TextColor3 = Color3.fromRGB(200, 100, 255)
+        ToggleInvis.BackgroundColor3 = Color3.fromRGB(200, 0, 255)
+        InvisLabel.Text = "👻 Visibilidade: Invisível (só para você)"
+        InvisLabel.TextColor3 = Color3.fromRGB(255, 100, 255)
     else
         ToggleInvis.Text = "INVISIBILITY: OFF"
         ToggleInvis.BackgroundColor3 = Color3.fromRGB(100, 0, 150)
@@ -928,166 +1008,4 @@ ToggleInvis.MouseButton1Click:Connect(function()
 end)
 
 -- Função do botão esconder/mostrar painel
-TogglePanel.MouseButton1Click:Connect(function()
-    IsPanelVisible = not IsPanelVisible
-    local elementsToToggle = {ToggleESP, ToggleAim, ToggleShootMode, ToggleMagnet, ToggleLock, ToggleTeamESP, ToggleTeamAim, ToggleWallCheck, TogglePriority, ToggleInvis, StatusLabel, SliderContainer, ModeLabel, PriorityLabel, InvisLabel, WarningLabel}
-    for _, element in ipairs(elementsToToggle) do
-        if element and element:IsA("GuiObject") then
-            element.Visible = IsPanelVisible
-        end
-    end
-    if IsPanelVisible then
-        MainFrame.Size = UDim2.new(0, 260, 0, 620)
-        TogglePanel.Position = UDim2.new(0.05, 0, 0, 360)
-        TogglePanel.Text = "HIDE PANEL 👁️"
-        TogglePanel.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
-        Title.Text = "🔥 AIM ASSIST ULTRA 🔥"
-    else
-        MainFrame.Size = UDim2.new(0, 260, 0, 70)
-        TogglePanel.Position = UDim2.new(0.05, 0, 0, 40)
-        TogglePanel.Text = "SHOW PANEL 👁️‍🗨️"
-        TogglePanel.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
-        Title.Text = "🔥 MENU 🔥"
-    end
-end)
-
--- FOV Circle
-FOV_Circle = Drawing.new("Circle")
-FOV_Circle.Visible = false
-FOV_Circle.Thickness = 2
-FOV_Circle.NumSides = 64
-FOV_Circle.Radius = AimAssist.MaxFOVForDistance -- Começa com o do modo Distance
-FOV_Circle.Filled = false
-FOV_Circle.Transparency = 0.3
-FOV_Circle.Color = Color3.fromRGB(0, 255, 255) -- Ciano para indicar modo distância
-
--- Loop principal
-if Connection then Connection:Disconnect() end
-Connection = RunService.RenderStepped:Connect(function()
-    ApplyAimAssist()
-    UpdateESP()
-    if IsShooting then
-        StatusLabel.Text = "Status: ATIRANDO - Aim Ativo!"
-        StatusLabel.TextColor3 = Color3.fromRGB(255, 0, 0)
-    elseif AimAssist.Enabled and AimAssist.ShootToActivate then
-        StatusLabel.Text = "Status: Esperando tiro..."
-        StatusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
-    elseif AimAssist.Enabled then
-        StatusLabel.Text = "Status: Sempre Ativo"
-        StatusLabel.TextColor3 = Color3.fromRGB(255, 255, 0)
-    else
-        StatusLabel.Text = "Status: Desativado"
-        StatusLabel.TextColor3 = Color3.fromRGB(100, 100, 100)
-    end
-end)
-
--- Criar ESP para jogadores existentes
-for _, player in pairs(Players:GetPlayers()) do
-    CreateESP(player)
-end
-
-Players.PlayerAdded:Connect(function(player)
-    wait(1)
-    CreateESP(player)
-end)
-
-Players.PlayerRemoving:Connect(RemoveESP)
-
--- Sistema de detecção de tiro
-Mouse.Button1Down:Connect(function()
-    IsShooting = true
-    LastClickTime = tick()
-end)
-
-Mouse.Button1Up:Connect(function()
-    IsShooting = false
-    LockedTarget = nil
-end)
-
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch or input.KeyCode == Enum.KeyCode.Space or input.KeyCode == Enum.KeyCode.Q then
-        IsShooting = true
-        LastClickTime = tick()
-    end
-end)
-
-UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch or input.KeyCode == Enum.KeyCode.Space or input.KeyCode == Enum.KeyCode.Q then
-        IsShooting = false
-        LockedTarget = nil
-    end
-end)
-
-spawn(function()
-    while wait(0.05) do
-        if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
-            if not IsShooting then IsShooting = true end
-        else
-            if IsShooting then IsShooting = false LockedTarget = nil end
-        end
-        if IsShooting and (tick() - LastClickTime) > 3 then
-            IsShooting = false
-            LockedTarget = nil
-        end
-    end
-end)
-
--- TECLA F COMO TOGGLE (CLICA PARA LIGAR, CLICA PARA DESLIGAR)
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.KeyCode == Enum.KeyCode.Insert then
-        TogglePanel.MouseButton1Click:Fire()
-    end
-    if input.KeyCode == Enum.KeyCode.F then
-        -- Toggle do Aim Assist (liga/desliga com um clique)
-        AimAssist.Enabled = not AimAssist.Enabled
-        ToggleAim.Text = "AIM ASSIST: " .. (AimAssist.Enabled and "ON 🔥" or "OFF")
-        ToggleAim.BackgroundColor3 = AimAssist.Enabled and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(200, 50, 50)
-        if AimAssist.Enabled then
-            Title.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
-            wait(0.2)
-            Title.BackgroundColor3 = Color3.fromRGB(180, 0, 0)
-        end
-    end
-    -- 👻 NOVO: Tecla V para invisibilidade
-    if input.KeyCode == Enum.KeyCode.V then
-        ToggleInvis.MouseButton1Click:Fire()
-    end
-end)
-
--- 👻 NOVO: Reaplica invisibilidade quando respawnar
-LocalPlayer.CharacterAdded:Connect(function(newCharacter)
-    wait(2)
-    UpdateReferences()
-    
-    -- Se estava invisível, reaplica no novo personagem
-    if Invisibility.Enabled then
-        wait(0.5) -- Espera o personagem carregar completamente
-        SaveOriginalTransparency(newCharacter)
-        ApplyInvisibility()
-    end
-    
-    for _, player in pairs(Players:GetPlayers()) do
-        if not ESPObjects[player] then
-            CreateESP(player)
-        end
-    end
-end)
-
--- Inicializar
-ToggleShootMode.Text = "ON SHOOT ONLY: ON 🎯"
-ToggleShootMode.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
-TogglePriority.Text = "PRIORITY: DISTANCE 🎯"
-TogglePriority.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
-ToggleInvis.Text = "INVISIBILITY: OFF 👻"
-ToggleInvis.BackgroundColor3 = Color3.fromRGB(100, 0, 150)
-
-print("=== 🔥 AIM ASSIST ULTRA - ATIVA AO ATIRAR 🔥 ===")
-print("🎯 NOVO: Sistema de prioridade por DISTÂNCIA 3D")
-print("👻 NOVO: Modo Invisível (Tecla V)")
-print("FORÇA: 95% (0.95 smoothness)")
-print("F = Toggle Aim Assist (liga/desliga)")
-print("V = Toggle Invisibilidade")
-print("Insert = Esconder/mostrar painel")
-print("Modo Distance: Pega o inimigo mais próximo de você (não mais central)")
+Toggle
