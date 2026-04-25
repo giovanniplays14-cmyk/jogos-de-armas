@@ -1,0 +1,752 @@
+-- FPS Optimizer v6.0 - MAXIMUM COMPATIBLE
+-- Place in StarterPlayerScripts
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Lighting = game:GetService("Lighting")
+local Workspace = game:GetService("Workspace")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- Settings state
+local Settings = {
+    ReduceGraphics = false,
+    DisableShadows = false,
+    ReduceRenderDistance = false,
+    DisableParticles = false,
+    OptimizeLighting = false,
+    DisableBloom = false,
+    ReduceTextureQuality = false,
+    DisableDecals = false,
+    LowQualityParts = false,
+    DisableCharacterEffects = false,
+    OptimizeWorkspace = false,
+    DisableAnimations = false,
+    ReduceSound = false,
+    OptimizeCamera = false,
+}
+
+-- Variables
+local originalStates = {}
+local originalLightingTech = nil
+local originalTextureQuality = nil
+local originalMeshDetail = nil
+local originalFogStart = nil
+local originalFogEnd = nil
+local fpsCounter = 0
+local lastTick = tick()
+local connections = {}
+
+-- Utility functions
+local function SafeCall(func)
+    local success, result = pcall(func)
+    if not success then
+        warn("[FPS Optimizer] Error: " .. tostring(result))
+    end
+    return success, result
+end
+
+local function DisconnectAll()
+    for _, conn in pairs(connections) do
+        if typeof(conn) == "RBXScriptConnection" then
+            pcall(function() conn:Disconnect() end)
+        end
+    end
+    connections = {}
+end
+
+-- OPTIMIZATION FUNCTIONS
+
+function ApplyOptimization(key)
+    SafeCall(function()
+        if key == "ReduceGraphics" then
+            SafeCall(function()
+                local UserSettings = UserSettings()
+                local GameSettings = UserSettings.GameSettings
+                GameSettings.SavedQualityLevel = Enum.SavedQualitySetting.QualityLevel1
+            end)
+            SafeCall(function()
+                settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+            end)
+            
+        elseif key == "DisableShadows" then
+            Lighting.GlobalShadows = false
+            for _, obj in pairs(Workspace:GetDescendants()) do
+                if obj:IsA("BasePart") then
+                    if originalStates[obj] == nil then
+                        originalStates[obj] = obj.CastShadow
+                    end
+                    obj.CastShadow = false
+                end
+            end
+            
+        elseif key == "ReduceRenderDistance" then
+            local camera = Workspace.CurrentCamera
+            if camera then
+                camera.FieldOfView = 70
+            end
+            
+        elseif key == "DisableParticles" then
+            for _, obj in pairs(Workspace:GetDescendants()) do
+                if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Smoke") or obj:IsA("Fire") or obj:IsA("Sparkles") then
+                    if originalStates[obj] == nil then
+                        originalStates[obj] = obj.Enabled
+                    end
+                    obj.Enabled = false
+                end
+            end
+            
+        elseif key == "OptimizeLighting" then
+            originalLightingTech = Lighting.Technology
+            originalFogStart = Lighting.FogStart
+            originalFogEnd = Lighting.FogEnd
+            SafeCall(function()
+                Lighting.Technology = Enum.Technology.Compatibility
+            end)
+            SafeCall(function()
+                Lighting.FogEnd = 500
+                Lighting.FogStart = 0
+            end)
+            
+        elseif key == "DisableBloom" then
+            for _, effect in pairs(Lighting:GetChildren()) do
+                if effect:IsA("BloomEffect") or effect:IsA("BlurEffect") or effect:IsA("SunRaysEffect") or effect:IsA("ColorCorrectionEffect") or effect:IsA("DepthOfFieldEffect") then
+                    if originalStates[effect] == nil then
+                        originalStates[effect] = effect.Enabled
+                    end
+                    effect.Enabled = false
+                end
+            end
+            
+        elseif key == "ReduceTextureQuality" then
+            SafeCall(function()
+                originalTextureQuality = settings().Rendering.TextureQuality
+                settings().Rendering.TextureQuality = Enum.TextureQuality.Low
+            end)
+            
+        elseif key == "DisableDecals" then
+            for _, obj in pairs(Workspace:GetDescendants()) do
+                if obj:IsA("Decal") or obj:IsA("Texture") then
+                    if originalStates[obj] == nil then
+                        originalStates[obj] = obj.Transparency
+                    end
+                    obj.Transparency = 1
+                end
+            end
+            
+        elseif key == "LowQualityParts" then
+            SafeCall(function()
+                originalMeshDetail = settings().Rendering.MeshPartDetailLevel
+                settings().Rendering.MeshPartDetailLevel = Enum.MeshPartDetailLevel.Level04
+            end)
+            
+        elseif key == "DisableCharacterEffects" then
+            SafeCall(function()
+                local character = player.Character
+                if character then
+                    for _, obj in pairs(character:GetDescendants()) do
+                        if obj:IsA("Trail") or obj:IsA("ParticleEmitter") or obj:IsA("Beam") then
+                            if originalStates[obj] == nil then
+                                originalStates[obj] = obj.Enabled
+                            end
+                            obj.Enabled = false
+                        end
+                    end
+                end
+            end)
+            
+        elseif key == "OptimizeWorkspace" then
+            for _, obj in pairs(Workspace:GetDescendants()) do
+                if obj:IsA("BasePart") then
+                    if obj.Transparency >= 1 and obj.CanCollide == false then
+                        if originalStates[obj] == nil then
+                            originalStates[obj] = obj.Parent
+                        end
+                        obj.Parent = nil
+                    end
+                end
+            end
+            
+        elseif key == "DisableAnimations" then
+            SafeCall(function()
+                local character = player.Character
+                if character then
+                    local humanoid = character:FindFirstChildOfClass("Humanoid")
+                    if humanoid then
+                        for _, track in pairs(humanoid:GetPlayingAnimationTracks()) do
+                            track:AdjustSpeed(0.5)
+                        end
+                    end
+                end
+            end)
+            
+        elseif key == "ReduceSound" then
+            for _, obj in pairs(Workspace:GetDescendants()) do
+                if obj:IsA("Sound") then
+                    if originalStates[obj] == nil then
+                        originalStates[obj] = obj.Volume
+                    end
+                    obj.Volume = 0
+                end
+            end
+            
+        elseif key == "OptimizeCamera" then
+            local camera = Workspace.CurrentCamera
+            if camera then
+                SafeCall(function()
+                    camera.FieldOfView = 70
+                end)
+            end
+        end
+    end)
+end
+
+function RemoveOptimization(key)
+    SafeCall(function()
+        if key == "ReduceGraphics" then
+            SafeCall(function()
+                local UserSettings = UserSettings()
+                local GameSettings = UserSettings.GameSettings
+                GameSettings.SavedQualityLevel = Enum.SavedQualitySetting.Automatic
+            end)
+            SafeCall(function()
+                settings().Rendering.QualityLevel = Enum.QualityLevel.Level10
+            end)
+            
+        elseif key == "DisableShadows" then
+            Lighting.GlobalShadows = true
+            for obj, state in pairs(originalStates) do
+                if typeof(obj) == "Instance" and obj:IsA("BasePart") then
+                    obj.CastShadow = state
+                    originalStates[obj] = nil
+                end
+            end
+            
+        elseif key == "ReduceRenderDistance" then
+            local camera = Workspace.CurrentCamera
+            if camera then
+                camera.FieldOfView = 70
+            end
+            
+        elseif key == "DisableParticles" then
+            for obj, state in pairs(originalStates) do
+                if typeof(obj) == "Instance" and (obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Smoke") or obj:IsA("Fire") or obj:IsA("Sparkles")) then
+                    obj.Enabled = state
+                    originalStates[obj] = nil
+                end
+            end
+            
+        elseif key == "OptimizeLighting" then
+            if originalLightingTech then
+                SafeCall(function()
+                    Lighting.Technology = originalLightingTech
+                end)
+                originalLightingTech = nil
+            end
+            if originalFogEnd then
+                SafeCall(function()
+                    Lighting.FogEnd = originalFogEnd
+                    Lighting.FogStart = originalFogStart
+                end)
+                originalFogEnd = nil
+                originalFogStart = nil
+            end
+            
+        elseif key == "DisableBloom" then
+            for obj, state in pairs(originalStates) do
+                if typeof(obj) == "Instance" and (obj:IsA("BloomEffect") or obj:IsA("BlurEffect") or obj:IsA("SunRaysEffect") or obj:IsA("ColorCorrectionEffect") or obj:IsA("DepthOfFieldEffect")) then
+                    obj.Enabled = state
+                    originalStates[obj] = nil
+                end
+            end
+            
+        elseif key == "ReduceTextureQuality" then
+            if originalTextureQuality then
+                SafeCall(function()
+                    settings().Rendering.TextureQuality = originalTextureQuality
+                end)
+                originalTextureQuality = nil
+            end
+            
+        elseif key == "DisableDecals" then
+            for obj, state in pairs(originalStates) do
+                if typeof(obj) == "Instance" and (obj:IsA("Decal") or obj:IsA("Texture")) then
+                    obj.Transparency = state
+                    originalStates[obj] = nil
+                end
+            end
+            
+        elseif key == "LowQualityParts" then
+            if originalMeshDetail then
+                SafeCall(function()
+                    settings().Rendering.MeshPartDetailLevel = originalMeshDetail
+                end)
+                originalMeshDetail = nil
+            end
+            
+        elseif key == "DisableCharacterEffects" then
+            SafeCall(function()
+                local character = player.Character
+                if character then
+                    for obj, state in pairs(originalStates) do
+                        if typeof(obj) == "Instance" and (obj:IsA("Trail") or obj:IsA("ParticleEmitter") or obj:IsA("Beam")) then
+                            obj.Enabled = state
+                            originalStates[obj] = nil
+                        end
+                    end
+                end
+            end)
+            
+        elseif key == "OptimizeWorkspace" then
+            for obj, parent in pairs(originalStates) do
+                if typeof(obj) == "Instance" and obj:IsA("BasePart") and parent then
+                    obj.Parent = parent
+                    originalStates[obj] = nil
+                end
+            end
+            
+        elseif key == "DisableAnimations" then
+            SafeCall(function()
+                local character = player.Character
+                if character then
+                    local humanoid = character:FindFirstChildOfClass("Humanoid")
+                    if humanoid then
+                        for _, track in pairs(humanoid:GetPlayingAnimationTracks()) do
+                            track:AdjustSpeed(1)
+                        end
+                    end
+                end
+            end)
+            
+        elseif key == "ReduceSound" then
+            for obj, state in pairs(originalStates) do
+                if typeof(obj) == "Instance" and obj:IsA("Sound") then
+                    obj.Volume = state
+                    originalStates[obj] = nil
+                end
+            end
+            
+        elseif key == "OptimizeCamera" then
+            local camera = Workspace.CurrentCamera
+            if camera then
+                SafeCall(function()
+                    camera.FieldOfView = 70
+                end)
+            end
+        end
+    end)
+end
+
+-- UI CREATION
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "FPSOptimizer"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.Parent = playerGui
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 320, 0, 520)
+MainFrame.Position = UDim2.new(0.5, -160, 0.5, -260)
+MainFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+MainFrame.BorderSizePixel = 0
+MainFrame.ClipsDescendants = true
+MainFrame.Parent = ScreenGui
+
+local Border = Instance.new("UIStroke")
+Border.Color = Color3.fromRGB(40, 40, 40)
+Border.Thickness = 1
+Border.Parent = MainFrame
+
+local TitleBar = Instance.new("Frame")
+TitleBar.Name = "TitleBar"
+TitleBar.Size = UDim2.new(1, 0, 0, 50)
+TitleBar.BackgroundColor3 = Color3.fromRGB(5, 5, 5)
+TitleBar.BorderSizePixel = 0
+TitleBar.Parent = MainFrame
+
+local Title = Instance.new("TextLabel")
+Title.Name = "Title"
+Title.Size = UDim2.new(1, -60, 1, 0)
+Title.Position = UDim2.new(0, 20, 0, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "FPS OPTIMIZER"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 14
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = TitleBar
+
+local FPSDisplay = Instance.new("TextLabel")
+FPSDisplay.Name = "FPS"
+FPSDisplay.Size = UDim2.new(0, 80, 0, 30)
+FPSDisplay.Position = UDim2.new(1, -90, 0.5, -15)
+FPSDisplay.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+FPSDisplay.BorderSizePixel = 0
+FPSDisplay.Text = "60"
+FPSDisplay.TextColor3 = Color3.fromRGB(255, 255, 255)
+FPSDisplay.Font = Enum.Font.GothamBold
+FPSDisplay.TextSize = 16
+FPSDisplay.Parent = TitleBar
+
+local MinimizeBtn = Instance.new("TextButton")
+MinimizeBtn.Name = "Minimize"
+MinimizeBtn.Size = UDim2.new(0, 30, 0, 30)
+MinimizeBtn.Position = UDim2.new(1, -40, 0.5, -15)
+MinimizeBtn.BackgroundTransparency = 1
+MinimizeBtn.Text = "-"
+MinimizeBtn.TextColor3 = Color3.fromRGB(150, 150, 150)
+MinimizeBtn.Font = Enum.Font.GothamBold
+MinimizeBtn.TextSize = 20
+MinimizeBtn.Parent = TitleBar
+
+local ScrollFrame = Instance.new("ScrollingFrame")
+ScrollFrame.Name = "Scroll"
+ScrollFrame.Size = UDim2.new(1, -40, 1, -130)
+ScrollFrame.Position = UDim2.new(0, 20, 0, 70)
+ScrollFrame.BackgroundTransparency = 1
+ScrollFrame.BorderSizePixel = 0
+ScrollFrame.ScrollBarThickness = 2
+ScrollFrame.ScrollBarImageColor3 = Color3.fromRGB(100, 100, 100)
+ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 500)
+ScrollFrame.Parent = MainFrame
+
+local UIList = Instance.new("UIListLayout")
+UIList.Padding = UDim.new(0, 8)
+UIList.SortOrder = Enum.SortOrder.LayoutOrder
+UIList.Parent = ScrollFrame
+
+-- TOGGLE CREATION FUNCTION
+local function CreateToggle(name, settingKey, description)
+    local ToggleFrame = Instance.new("Frame")
+    ToggleFrame.Name = name
+    ToggleFrame.Size = UDim2.new(1, 0, 0, 60)
+    ToggleFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+    ToggleFrame.BorderSizePixel = 0
+    ToggleFrame.Parent = ScrollFrame
+    
+    local ToggleCorner = Instance.new("UICorner")
+    ToggleCorner.CornerRadius = UDim.new(0, 4)
+    ToggleCorner.Parent = ToggleFrame
+    
+    local Stroke = Instance.new("UIStroke")
+    Stroke.Color = Color3.fromRGB(30, 30, 30)
+    Stroke.Thickness = 1
+    Stroke.Parent = ToggleFrame
+    
+    local Label = Instance.new("TextLabel")
+    Label.Name = "Label"
+    Label.Size = UDim2.new(1, -70, 0, 25)
+    Label.Position = UDim2.new(0, 15, 0, 8)
+    Label.BackgroundTransparency = 1
+    Label.Text = name:upper()
+    Label.TextColor3 = Color3.fromRGB(200, 200, 200)
+    Label.Font = Enum.Font.GothamBold
+    Label.TextSize = 12
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    Label.Parent = ToggleFrame
+    
+    local Desc = Instance.new("TextLabel")
+    Desc.Name = "Desc"
+    Desc.Size = UDim2.new(1, -70, 0, 20)
+    Desc.Position = UDim2.new(0, 15, 0, 33)
+    Desc.BackgroundTransparency = 1
+    Desc.Text = description
+    Desc.TextColor3 = Color3.fromRGB(100, 100, 100)
+    Desc.Font = Enum.Font.Gotham
+    Desc.TextSize = 10
+    Desc.TextXAlignment = Enum.TextXAlignment.Left
+    Desc.Parent = ToggleFrame
+    
+    local Button = Instance.new("TextButton")
+    Button.Name = "Button"
+    Button.Size = UDim2.new(0, 44, 0, 24)
+    Button.Position = UDim2.new(1, -59, 0.5, -12)
+    Button.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    Button.BorderSizePixel = 0
+    Button.Text = ""
+    Button.AutoButtonColor = false
+    Button.Parent = ToggleFrame
+    
+    local ButtonCorner = Instance.new("UICorner")
+    ButtonCorner.CornerRadius = UDim.new(1, 0)
+    ButtonCorner.Parent = Button
+    
+    local Indicator = Instance.new("Frame")
+    Indicator.Name = "Indicator"
+    Indicator.Size = UDim2.new(0, 18, 0, 18)
+    Indicator.Position = UDim2.new(0, 3, 0.5, -9)
+    Indicator.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+    Indicator.BorderSizePixel = 0
+    Indicator.Parent = Button
+    
+    local IndCorner = Instance.new("UICorner")
+    IndCorner.CornerRadius = UDim.new(1, 0)
+    IndCorner.Parent = Indicator
+    
+    local enabled = false
+    
+    local function UpdateVisual()
+        if enabled then
+            TweenService:Create(Button, TweenInfo.new(0.2), {
+                BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+            }):Play()
+            TweenService:Create(Indicator, TweenInfo.new(0.2), {
+                Position = UDim2.new(1, -21, 0.5, -9),
+                BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+            }):Play()
+            ToggleFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+            Stroke.Color = Color3.fromRGB(60, 60, 60)
+        else
+            TweenService:Create(Button, TweenInfo.new(0.2), {
+                BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+            }):Play()
+            TweenService:Create(Indicator, TweenInfo.new(0.2), {
+                Position = UDim2.new(0, 3, 0.5, -9),
+                BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+            }):Play()
+            ToggleFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+            Stroke.Color = Color3.fromRGB(30, 30, 30)
+        end
+    end
+    
+    Button.MouseButton1Click:Connect(function()
+        enabled = not enabled
+        Settings[settingKey] = enabled
+        UpdateVisual()
+        
+        if enabled then
+            ApplyOptimization(settingKey)
+        else
+            RemoveOptimization(settingKey)
+        end
+    end)
+    
+    ToggleFrame.MouseEnter:Connect(function()
+        if not enabled then
+            TweenService:Create(ToggleFrame, TweenInfo.new(0.2), {
+                BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+            }):Play()
+        end
+    end)
+    
+    ToggleFrame.MouseLeave:Connect(function()
+        if not enabled then
+            TweenService:Create(ToggleFrame, TweenInfo.new(0.2), {
+                BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+            }):Play()
+        end
+    end)
+    
+    return ToggleFrame
+end
+
+-- Create all toggles
+CreateToggle("Reduce Graphics", "ReduceGraphics", "Minimum quality level")
+CreateToggle("No Shadows", "DisableShadows", "Disable global shadows")
+CreateToggle("Short Distance", "ReduceRenderDistance", "Reduce render distance")
+CreateToggle("No Particles", "DisableParticles", "Remove particle effects")
+CreateToggle("Simple Lighting", "OptimizeLighting", "Compatibility mode")
+CreateToggle("No Bloom", "DisableBloom", "Disable bloom effects")
+CreateToggle("Low Textures", "ReduceTextureQuality", "Minimum quality")
+CreateToggle("No Decals", "DisableDecals", "Remove map decals")
+CreateToggle("Simple Parts", "LowQualityParts", "Simplified geometry")
+CreateToggle("No Char Effects", "DisableCharacterEffects", "Remove trails and aura")
+CreateToggle("Optimize Workspace", "OptimizeWorkspace", "Remove invisible objects")
+CreateToggle("Simple Animations", "DisableAnimations", "Reduce complexity")
+CreateToggle("Reduce Sound", "ReduceSound", "Zero volume for sounds")
+CreateToggle("Optimize Camera", "OptimizeCamera", "Default FOV 70")
+
+-- Optimize all button
+local OptimizeAllBtn = Instance.new("TextButton")
+OptimizeAllBtn.Name = "OptimizeAll"
+OptimizeAllBtn.Size = UDim2.new(1, -40, 0, 45)
+OptimizeAllBtn.Position = UDim2.new(0, 20, 1, -55)
+OptimizeAllBtn.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+OptimizeAllBtn.BorderSizePixel = 0
+OptimizeAllBtn.Text = "OPTIMIZE ALL"
+OptimizeAllBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
+OptimizeAllBtn.Font = Enum.Font.GothamBold
+OptimizeAllBtn.TextSize = 12
+OptimizeAllBtn.Parent = MainFrame
+
+local AllCorner = Instance.new("UICorner")
+AllCorner.CornerRadius = UDim.new(0, 4)
+AllCorner.Parent = OptimizeAllBtn
+
+-- Disable all button
+local DisableAllBtn = Instance.new("TextButton")
+DisableAllBtn.Name = "DisableAll"
+DisableAllBtn.Size = UDim2.new(0.48, -20, 0, 35)
+DisableAllBtn.Position = UDim2.new(0, 20, 1, -100)
+DisableAllBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+DisableAllBtn.BorderSizePixel = 0
+DisableAllBtn.Text = "DISABLE ALL"
+DisableAllBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+DisableAllBtn.Font = Enum.Font.GothamBold
+DisableAllBtn.TextSize = 11
+DisableAllBtn.Parent = MainFrame
+
+local DisCorner = Instance.new("UICorner")
+DisCorner.CornerRadius = UDim.new(0, 4)
+DisCorner.Parent = DisableAllBtn
+
+-- Optimize all
+OptimizeAllBtn.MouseButton1Click:Connect(function()
+    for key, _ in pairs(Settings) do
+        Settings[key] = true
+        ApplyOptimization(key)
+    end
+    
+    for _, frame in pairs(ScrollFrame:GetChildren()) do
+        if frame:IsA("Frame") and frame:FindFirstChild("Button") then
+            local btn = frame.Button
+            local ind = btn.Indicator
+            TweenService:Create(btn, TweenInfo.new(0.2), {
+                BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+            }):Play()
+            TweenService:Create(ind, TweenInfo.new(0.2), {
+                Position = UDim2.new(1, -21, 0.5, -9),
+                BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+            }):Play()
+            frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+        end
+    end
+end)
+
+-- Disable all
+DisableAllBtn.MouseButton1Click:Connect(function()
+    for key, _ in pairs(Settings) do
+        Settings[key] = false
+        RemoveOptimization(key)
+    end
+    
+    for _, frame in pairs(ScrollFrame:GetChildren()) do
+        if frame:IsA("Frame") and frame:FindFirstChild("Button") then
+            local btn = frame.Button
+            local ind = btn.Indicator
+            TweenService:Create(btn, TweenInfo.new(0.2), {
+                BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+            }):Play()
+            TweenService:Create(ind, TweenInfo.new(0.2), {
+                Position = UDim2.new(0, 3, 0.5, -9),
+                BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+            }):Play()
+            frame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+        end
+    end
+end)
+
+-- Minimize/Maximize
+local minimized = false
+MinimizeBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    if minimized then
+        TweenService:Create(MainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {
+            Size = UDim2.new(0, 320, 0, 50),
+            Position = UDim2.new(0.5, -160, 0.5, -25)
+        }):Play()
+        MinimizeBtn.Text = "+"
+        ScrollFrame.Visible = false
+        OptimizeAllBtn.Visible = false
+        DisableAllBtn.Visible = false
+    else
+        TweenService:Create(MainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {
+            Size = UDim2.new(0, 320, 0, 520),
+            Position = UDim2.new(0.5, -160, 0.5, -260)
+        }):Play()
+        MinimizeBtn.Text = "-"
+        wait(0.1)
+        ScrollFrame.Visible = true
+        OptimizeAllBtn.Visible = true
+        DisableAllBtn.Visible = true
+    end
+end)
+
+-- FPS Counter
+RunService.RenderStepped:Connect(function()
+    fpsCounter = fpsCounter + 1
+    local current = tick()
+    if current - lastTick >= 1 then
+        FPSDisplay.Text = tostring(math.floor(fpsCounter))
+        
+        if fpsCounter >= 60 then
+            FPSDisplay.TextColor3 = Color3.fromRGB(255, 255, 255)
+        elseif fpsCounter >= 30 then
+            FPSDisplay.TextColor3 = Color3.fromRGB(180, 180, 180)
+        else
+            FPSDisplay.TextColor3 = Color3.fromRGB(120, 120, 120)
+        end
+        
+        fpsCounter = 0
+        lastTick = current
+    end
+end)
+
+-- Draggable
+local dragging = false
+local dragInput, dragStart, startPos
+
+TitleBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+    end
+end)
+
+TitleBar.InputChanged:Connect(function(input)
+    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        local delta = input.Position - dragStart
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+TitleBar.InputEnded:Connect(function()
+    dragging = false
+end)
+
+-- Monitor new objects
+table.insert(connections, Workspace.DescendantAdded:Connect(function(obj)
+    if Settings.DisableShadows and obj:IsA("BasePart") then
+        SafeCall(function()
+            obj.CastShadow = false
+        end)
+    end
+    if Settings.DisableParticles and (obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Smoke") or obj:IsA("Fire") or obj:IsA("Sparkles")) then
+        SafeCall(function()
+            obj.Enabled = false
+        end)
+    end
+    if Settings.DisableDecals and (obj:IsA("Decal") or obj:IsA("Texture")) then
+        SafeCall(function()
+            obj.Transparency = 1
+        end)
+    end
+end))
+
+-- Monitor character
+table.insert(connections, player.CharacterAdded:Connect(function(char)
+    if Settings.DisableCharacterEffects then
+        wait(1)
+        for _, obj in pairs(char:GetDescendants()) do
+            if obj:IsA("Trail") or obj:IsA("ParticleEmitter") or obj:IsA("Beam") then
+                SafeCall(function()
+                    obj.Enabled = false
+                end)
+            end
+        end
+    end
+end))
+
+-- Keybind to toggle UI (Right Shift)
+table.insert(connections, UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if not gameProcessed and input.KeyCode == Enum.KeyCode.RightShift then
+        ScreenGui.Enabled = not ScreenGui.Enabled
+    end
+end))
+
+print("[FPS Optimizer] v6.0 MAXIMUM loaded successfully!")
