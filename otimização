@@ -1,4 +1,4 @@
--- FPS Optimizer v6.0 - MAXIMUM COMPATIBLE
+-- FPS Optimizer v6.0 - MAXIMUM COMPATIBLE WITH SAVE SYSTEM
 -- Place in StarterPlayerScripts
 
 local Players = game:GetService("Players")
@@ -7,26 +7,88 @@ local Lighting = game:GetService("Lighting")
 local Workspace = game:GetService("Workspace")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
+-- ==================== SAVE SYSTEM ====================
+local SaveSystem = {
+    ConfigName = "FPSOptimizer_Config_v1",
+    DefaultConfig = {
+        ReduceGraphics = false,
+        DisableShadows = false,
+        ReduceRenderDistance = false,
+        DisableParticles = false,
+        OptimizeLighting = false,
+        DisableBloom = false,
+        ReduceTextureQuality = false,
+        DisableDecals = false,
+        LowQualityParts = false,
+        DisableCharacterEffects = false,
+        OptimizeWorkspace = false,
+        DisableAnimations = false,
+        ReduceSound = false,
+        OptimizeCamera = false,
+    }
+}
+
+function SaveSystem:Load()
+    local success, result = pcall(function()
+        if readfile then
+            local data = readfile(self.ConfigName .. ".json")
+            return HttpService:JSONDecode(data)
+        end
+        return nil
+    end)
+
+    if success and result then
+        print("[SaveSystem] Config loaded")
+        return result
+    else
+        print("[SaveSystem] Using default config")
+        return self.DefaultConfig
+    end
+end
+
+function SaveSystem:Save(config)
+    pcall(function()
+        if writefile then
+            writefile(self.ConfigName .. ".json", HttpService:JSONEncode(config))
+            print("[SaveSystem] Config saved")
+        end
+    end)
+end
+
+function SaveSystem:Reset()
+    pcall(function()
+        if delfile then
+            delfile(self.ConfigName .. ".json")
+        end
+    end)
+    print("[SaveSystem] Config reset")
+    return self.DefaultConfig
+end
+
+-- Load saved config
+local SavedConfig = SaveSystem:Load()
+
 -- Settings state
 local Settings = {
-    ReduceGraphics = false,
-    DisableShadows = false,
-    ReduceRenderDistance = false,
-    DisableParticles = false,
-    OptimizeLighting = false,
-    DisableBloom = false,
-    ReduceTextureQuality = false,
-    DisableDecals = false,
-    LowQualityParts = false,
-    DisableCharacterEffects = false,
-    OptimizeWorkspace = false,
-    DisableAnimations = false,
-    ReduceSound = false,
-    OptimizeCamera = false,
+    ReduceGraphics = SavedConfig.ReduceGraphics,
+    DisableShadows = SavedConfig.DisableShadows,
+    ReduceRenderDistance = SavedConfig.ReduceRenderDistance,
+    DisableParticles = SavedConfig.DisableParticles,
+    OptimizeLighting = SavedConfig.OptimizeLighting,
+    DisableBloom = SavedConfig.DisableBloom,
+    ReduceTextureQuality = SavedConfig.ReduceTextureQuality,
+    DisableDecals = SavedConfig.DisableDecals,
+    LowQualityParts = SavedConfig.LowQualityParts,
+    DisableCharacterEffects = SavedConfig.DisableCharacterEffects,
+    OptimizeWorkspace = SavedConfig.OptimizeWorkspace,
+    DisableAnimations = SavedConfig.DisableAnimations,
+    ReduceSound = SavedConfig.ReduceSound,
+    OptimizeCamera = SavedConfig.OptimizeCamera,
 }
 
 -- Variables
@@ -39,6 +101,9 @@ local originalFogEnd = nil
 local fpsCounter = 0
 local lastTick = tick()
 local connections = {}
+
+-- UI References
+local UIRefs = {}
 
 -- Utility functions
 local function SafeCall(func)
@@ -58,6 +123,27 @@ local function DisconnectAll()
     connections = {}
 end
 
+-- ==================== SAVE CURRENT CONFIG ====================
+local function SaveCurrentConfig()
+    local config = {
+        ReduceGraphics = Settings.ReduceGraphics,
+        DisableShadows = Settings.DisableShadows,
+        ReduceRenderDistance = Settings.ReduceRenderDistance,
+        DisableParticles = Settings.DisableParticles,
+        OptimizeLighting = Settings.OptimizeLighting,
+        DisableBloom = Settings.DisableBloom,
+        ReduceTextureQuality = Settings.ReduceTextureQuality,
+        DisableDecals = Settings.DisableDecals,
+        LowQualityParts = Settings.LowQualityParts,
+        DisableCharacterEffects = Settings.DisableCharacterEffects,
+        OptimizeWorkspace = Settings.OptimizeWorkspace,
+        DisableAnimations = Settings.DisableAnimations,
+        ReduceSound = Settings.ReduceSound,
+        OptimizeCamera = Settings.OptimizeCamera,
+    }
+    SaveSystem:Save(config)
+end
+
 -- OPTIMIZATION FUNCTIONS
 
 function ApplyOptimization(key)
@@ -71,7 +157,7 @@ function ApplyOptimization(key)
             SafeCall(function()
                 settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
             end)
-            
+
         elseif key == "DisableShadows" then
             Lighting.GlobalShadows = false
             for _, obj in pairs(Workspace:GetDescendants()) do
@@ -82,13 +168,13 @@ function ApplyOptimization(key)
                     obj.CastShadow = false
                 end
             end
-            
+
         elseif key == "ReduceRenderDistance" then
             local camera = Workspace.CurrentCamera
             if camera then
                 camera.FieldOfView = 70
             end
-            
+
         elseif key == "DisableParticles" then
             for _, obj in pairs(Workspace:GetDescendants()) do
                 if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Smoke") or obj:IsA("Fire") or obj:IsA("Sparkles") then
@@ -98,7 +184,7 @@ function ApplyOptimization(key)
                     obj.Enabled = false
                 end
             end
-            
+
         elseif key == "OptimizeLighting" then
             originalLightingTech = Lighting.Technology
             originalFogStart = Lighting.FogStart
@@ -110,7 +196,7 @@ function ApplyOptimization(key)
                 Lighting.FogEnd = 500
                 Lighting.FogStart = 0
             end)
-            
+
         elseif key == "DisableBloom" then
             for _, effect in pairs(Lighting:GetChildren()) do
                 if effect:IsA("BloomEffect") or effect:IsA("BlurEffect") or effect:IsA("SunRaysEffect") or effect:IsA("ColorCorrectionEffect") or effect:IsA("DepthOfFieldEffect") then
@@ -120,13 +206,13 @@ function ApplyOptimization(key)
                     effect.Enabled = false
                 end
             end
-            
+
         elseif key == "ReduceTextureQuality" then
             SafeCall(function()
                 originalTextureQuality = settings().Rendering.TextureQuality
                 settings().Rendering.TextureQuality = Enum.TextureQuality.Low
             end)
-            
+
         elseif key == "DisableDecals" then
             for _, obj in pairs(Workspace:GetDescendants()) do
                 if obj:IsA("Decal") or obj:IsA("Texture") then
@@ -136,13 +222,13 @@ function ApplyOptimization(key)
                     obj.Transparency = 1
                 end
             end
-            
+
         elseif key == "LowQualityParts" then
             SafeCall(function()
                 originalMeshDetail = settings().Rendering.MeshPartDetailLevel
                 settings().Rendering.MeshPartDetailLevel = Enum.MeshPartDetailLevel.Level04
             end)
-            
+
         elseif key == "DisableCharacterEffects" then
             SafeCall(function()
                 local character = player.Character
@@ -157,7 +243,7 @@ function ApplyOptimization(key)
                     end
                 end
             end)
-            
+
         elseif key == "OptimizeWorkspace" then
             for _, obj in pairs(Workspace:GetDescendants()) do
                 if obj:IsA("BasePart") then
@@ -169,7 +255,7 @@ function ApplyOptimization(key)
                     end
                 end
             end
-            
+
         elseif key == "DisableAnimations" then
             SafeCall(function()
                 local character = player.Character
@@ -182,7 +268,7 @@ function ApplyOptimization(key)
                     end
                 end
             end)
-            
+
         elseif key == "ReduceSound" then
             for _, obj in pairs(Workspace:GetDescendants()) do
                 if obj:IsA("Sound") then
@@ -192,7 +278,7 @@ function ApplyOptimization(key)
                     obj.Volume = 0
                 end
             end
-            
+
         elseif key == "OptimizeCamera" then
             local camera = Workspace.CurrentCamera
             if camera then
@@ -215,7 +301,7 @@ function RemoveOptimization(key)
             SafeCall(function()
                 settings().Rendering.QualityLevel = Enum.QualityLevel.Level10
             end)
-            
+
         elseif key == "DisableShadows" then
             Lighting.GlobalShadows = true
             for obj, state in pairs(originalStates) do
@@ -224,13 +310,13 @@ function RemoveOptimization(key)
                     originalStates[obj] = nil
                 end
             end
-            
+
         elseif key == "ReduceRenderDistance" then
             local camera = Workspace.CurrentCamera
             if camera then
                 camera.FieldOfView = 70
             end
-            
+
         elseif key == "DisableParticles" then
             for obj, state in pairs(originalStates) do
                 if typeof(obj) == "Instance" and (obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Smoke") or obj:IsA("Fire") or obj:IsA("Sparkles")) then
@@ -238,7 +324,7 @@ function RemoveOptimization(key)
                     originalStates[obj] = nil
                 end
             end
-            
+
         elseif key == "OptimizeLighting" then
             if originalLightingTech then
                 SafeCall(function()
@@ -254,7 +340,7 @@ function RemoveOptimization(key)
                 originalFogEnd = nil
                 originalFogStart = nil
             end
-            
+
         elseif key == "DisableBloom" then
             for obj, state in pairs(originalStates) do
                 if typeof(obj) == "Instance" and (obj:IsA("BloomEffect") or obj:IsA("BlurEffect") or obj:IsA("SunRaysEffect") or obj:IsA("ColorCorrectionEffect") or obj:IsA("DepthOfFieldEffect")) then
@@ -262,7 +348,7 @@ function RemoveOptimization(key)
                     originalStates[obj] = nil
                 end
             end
-            
+
         elseif key == "ReduceTextureQuality" then
             if originalTextureQuality then
                 SafeCall(function()
@@ -270,7 +356,7 @@ function RemoveOptimization(key)
                 end)
                 originalTextureQuality = nil
             end
-            
+
         elseif key == "DisableDecals" then
             for obj, state in pairs(originalStates) do
                 if typeof(obj) == "Instance" and (obj:IsA("Decal") or obj:IsA("Texture")) then
@@ -278,7 +364,7 @@ function RemoveOptimization(key)
                     originalStates[obj] = nil
                 end
             end
-            
+
         elseif key == "LowQualityParts" then
             if originalMeshDetail then
                 SafeCall(function()
@@ -286,7 +372,7 @@ function RemoveOptimization(key)
                 end)
                 originalMeshDetail = nil
             end
-            
+
         elseif key == "DisableCharacterEffects" then
             SafeCall(function()
                 local character = player.Character
@@ -299,7 +385,7 @@ function RemoveOptimization(key)
                     end
                 end
             end)
-            
+
         elseif key == "OptimizeWorkspace" then
             for obj, parent in pairs(originalStates) do
                 if typeof(obj) == "Instance" and obj:IsA("BasePart") and parent then
@@ -307,7 +393,7 @@ function RemoveOptimization(key)
                     originalStates[obj] = nil
                 end
             end
-            
+
         elseif key == "DisableAnimations" then
             SafeCall(function()
                 local character = player.Character
@@ -320,7 +406,7 @@ function RemoveOptimization(key)
                     end
                 end
             end)
-            
+
         elseif key == "ReduceSound" then
             for obj, state in pairs(originalStates) do
                 if typeof(obj) == "Instance" and obj:IsA("Sound") then
@@ -328,7 +414,7 @@ function RemoveOptimization(key)
                     originalStates[obj] = nil
                 end
             end
-            
+
         elseif key == "OptimizeCamera" then
             local camera = Workspace.CurrentCamera
             if camera then
@@ -338,6 +424,13 @@ function RemoveOptimization(key)
             end
         end
     end)
+end
+
+-- Apply saved settings on load
+for key, value in pairs(Settings) do
+    if value then
+        ApplyOptimization(key)
+    end
 end
 
 -- UI CREATION
@@ -405,13 +498,13 @@ MinimizeBtn.Parent = TitleBar
 
 local ScrollFrame = Instance.new("ScrollingFrame")
 ScrollFrame.Name = "Scroll"
-ScrollFrame.Size = UDim2.new(1, -40, 1, -130)
+ScrollFrame.Size = UDim2.new(1, -40, 1, -210)
 ScrollFrame.Position = UDim2.new(0, 20, 0, 70)
 ScrollFrame.BackgroundTransparency = 1
 ScrollFrame.BorderSizePixel = 0
 ScrollFrame.ScrollBarThickness = 2
 ScrollFrame.ScrollBarImageColor3 = Color3.fromRGB(100, 100, 100)
-ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 500)
+ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 800)
 ScrollFrame.Parent = MainFrame
 
 local UIList = Instance.new("UIListLayout")
@@ -427,16 +520,16 @@ local function CreateToggle(name, settingKey, description)
     ToggleFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
     ToggleFrame.BorderSizePixel = 0
     ToggleFrame.Parent = ScrollFrame
-    
+
     local ToggleCorner = Instance.new("UICorner")
     ToggleCorner.CornerRadius = UDim.new(0, 4)
     ToggleCorner.Parent = ToggleFrame
-    
+
     local Stroke = Instance.new("UIStroke")
     Stroke.Color = Color3.fromRGB(30, 30, 30)
     Stroke.Thickness = 1
     Stroke.Parent = ToggleFrame
-    
+
     local Label = Instance.new("TextLabel")
     Label.Name = "Label"
     Label.Size = UDim2.new(1, -70, 0, 25)
@@ -448,7 +541,7 @@ local function CreateToggle(name, settingKey, description)
     Label.TextSize = 12
     Label.TextXAlignment = Enum.TextXAlignment.Left
     Label.Parent = ToggleFrame
-    
+
     local Desc = Instance.new("TextLabel")
     Desc.Name = "Desc"
     Desc.Size = UDim2.new(1, -70, 0, 20)
@@ -460,7 +553,7 @@ local function CreateToggle(name, settingKey, description)
     Desc.TextSize = 10
     Desc.TextXAlignment = Enum.TextXAlignment.Left
     Desc.Parent = ToggleFrame
-    
+
     local Button = Instance.new("TextButton")
     Button.Name = "Button"
     Button.Size = UDim2.new(0, 44, 0, 24)
@@ -470,11 +563,11 @@ local function CreateToggle(name, settingKey, description)
     Button.Text = ""
     Button.AutoButtonColor = false
     Button.Parent = ToggleFrame
-    
+
     local ButtonCorner = Instance.new("UICorner")
     ButtonCorner.CornerRadius = UDim.new(1, 0)
     ButtonCorner.Parent = Button
-    
+
     local Indicator = Instance.new("Frame")
     Indicator.Name = "Indicator"
     Indicator.Size = UDim2.new(0, 18, 0, 18)
@@ -482,13 +575,13 @@ local function CreateToggle(name, settingKey, description)
     Indicator.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
     Indicator.BorderSizePixel = 0
     Indicator.Parent = Button
-    
+
     local IndCorner = Instance.new("UICorner")
     IndCorner.CornerRadius = UDim.new(1, 0)
     IndCorner.Parent = Indicator
-    
-    local enabled = false
-    
+
+    local enabled = Settings[settingKey]
+
     local function UpdateVisual()
         if enabled then
             TweenService:Create(Button, TweenInfo.new(0.2), {
@@ -512,19 +605,29 @@ local function CreateToggle(name, settingKey, description)
             Stroke.Color = Color3.fromRGB(30, 30, 30)
         end
     end
-    
+
+    -- Apply visual on load
+    if enabled then
+        Button.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        Indicator.Position = UDim2.new(1, -21, 0.5, -9)
+        Indicator.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+        ToggleFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+        Stroke.Color = Color3.fromRGB(60, 60, 60)
+    end
+
     Button.MouseButton1Click:Connect(function()
         enabled = not enabled
         Settings[settingKey] = enabled
         UpdateVisual()
-        
+        SaveCurrentConfig()
+
         if enabled then
             ApplyOptimization(settingKey)
         else
             RemoveOptimization(settingKey)
         end
     end)
-    
+
     ToggleFrame.MouseEnter:Connect(function()
         if not enabled then
             TweenService:Create(ToggleFrame, TweenInfo.new(0.2), {
@@ -532,7 +635,7 @@ local function CreateToggle(name, settingKey, description)
             }):Play()
         end
     end)
-    
+
     ToggleFrame.MouseLeave:Connect(function()
         if not enabled then
             TweenService:Create(ToggleFrame, TweenInfo.new(0.2), {
@@ -540,7 +643,21 @@ local function CreateToggle(name, settingKey, description)
             }):Play()
         end
     end)
-    
+
+    -- Store reference
+    UIRefs[settingKey] = {
+        Set = function(state)
+            enabled = state
+            Settings[settingKey] = state
+            UpdateVisual()
+            if state then
+                ApplyOptimization(settingKey)
+            else
+                RemoveOptimization(settingKey)
+            end
+        end
+    }
+
     return ToggleFrame
 end
 
@@ -559,6 +676,54 @@ CreateToggle("Optimize Workspace", "OptimizeWorkspace", "Remove invisible object
 CreateToggle("Simple Animations", "DisableAnimations", "Reduce complexity")
 CreateToggle("Reduce Sound", "ReduceSound", "Zero volume for sounds")
 CreateToggle("Optimize Camera", "OptimizeCamera", "Default FOV 70")
+
+-- Save Config Button
+local SaveBtn = Instance.new("TextButton")
+SaveBtn.Name = "SaveConfig"
+SaveBtn.Size = UDim2.new(1, -40, 0, 35)
+SaveBtn.Position = UDim2.new(0, 20, 1, -145)
+SaveBtn.BackgroundColor3 = Color3.fromRGB(40, 120, 40)
+SaveBtn.BorderSizePixel = 0
+SaveBtn.Text = "SAVE CONFIG"
+SaveBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+SaveBtn.Font = Enum.Font.GothamBold
+SaveBtn.TextSize = 11
+SaveBtn.Parent = MainFrame
+
+local SaveCorner = Instance.new("UICorner")
+SaveCorner.CornerRadius = UDim.new(0, 4)
+SaveCorner.Parent = SaveBtn
+
+SaveBtn.MouseButton1Click:Connect(function()
+    SaveCurrentConfig()
+    SaveBtn.Text = "SAVED!"
+    wait(1)
+    SaveBtn.Text = "SAVE CONFIG"
+end)
+
+-- Reset Config Button
+local ResetBtn = Instance.new("TextButton")
+ResetBtn.Name = "ResetConfig"
+ResetBtn.Size = UDim2.new(0.48, -22, 0, 30)
+ResetBtn.Position = UDim2.new(0, 20, 1, -100)
+ResetBtn.BackgroundColor3 = Color3.fromRGB(120, 40, 40)
+ResetBtn.BorderSizePixel = 0
+ResetBtn.Text = "RESET"
+ResetBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+ResetBtn.Font = Enum.Font.GothamBold
+ResetBtn.TextSize = 10
+ResetBtn.Parent = MainFrame
+
+local ResetCorner = Instance.new("UICorner")
+ResetCorner.CornerRadius = UDim.new(0, 4)
+ResetCorner.Parent = ResetBtn
+
+ResetBtn.MouseButton1Click:Connect(function()
+    SaveSystem:Reset()
+    ResetBtn.Text = "REJOIN TO APPLY"
+    wait(2)
+    ResetBtn.Text = "RESET"
+end)
 
 -- Optimize all button
 local OptimizeAllBtn = Instance.new("TextButton")
@@ -581,7 +746,7 @@ AllCorner.Parent = OptimizeAllBtn
 local DisableAllBtn = Instance.new("TextButton")
 DisableAllBtn.Name = "DisableAll"
 DisableAllBtn.Size = UDim2.new(0.48, -20, 0, 35)
-DisableAllBtn.Position = UDim2.new(0, 20, 1, -100)
+DisableAllBtn.Position = UDim2.new(0.52, 0, 1, -100)
 DisableAllBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 DisableAllBtn.BorderSizePixel = 0
 DisableAllBtn.Text = "DISABLE ALL"
@@ -599,22 +764,11 @@ OptimizeAllBtn.MouseButton1Click:Connect(function()
     for key, _ in pairs(Settings) do
         Settings[key] = true
         ApplyOptimization(key)
-    end
-    
-    for _, frame in pairs(ScrollFrame:GetChildren()) do
-        if frame:IsA("Frame") and frame:FindFirstChild("Button") then
-            local btn = frame.Button
-            local ind = btn.Indicator
-            TweenService:Create(btn, TweenInfo.new(0.2), {
-                BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-            }):Play()
-            TweenService:Create(ind, TweenInfo.new(0.2), {
-                Position = UDim2.new(1, -21, 0.5, -9),
-                BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-            }):Play()
-            frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+        if UIRefs[key] then
+            UIRefs[key].Set(true)
         end
     end
+    SaveCurrentConfig()
 end)
 
 -- Disable all
@@ -622,22 +776,11 @@ DisableAllBtn.MouseButton1Click:Connect(function()
     for key, _ in pairs(Settings) do
         Settings[key] = false
         RemoveOptimization(key)
-    end
-    
-    for _, frame in pairs(ScrollFrame:GetChildren()) do
-        if frame:IsA("Frame") and frame:FindFirstChild("Button") then
-            local btn = frame.Button
-            local ind = btn.Indicator
-            TweenService:Create(btn, TweenInfo.new(0.2), {
-                BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-            }):Play()
-            TweenService:Create(ind, TweenInfo.new(0.2), {
-                Position = UDim2.new(0, 3, 0.5, -9),
-                BackgroundColor3 = Color3.fromRGB(80, 80, 80)
-            }):Play()
-            frame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+        if UIRefs[key] then
+            UIRefs[key].Set(false)
         end
     end
+    SaveCurrentConfig()
 end)
 
 -- Minimize/Maximize
@@ -653,6 +796,8 @@ MinimizeBtn.MouseButton1Click:Connect(function()
         ScrollFrame.Visible = false
         OptimizeAllBtn.Visible = false
         DisableAllBtn.Visible = false
+        SaveBtn.Visible = false
+        ResetBtn.Visible = false
     else
         TweenService:Create(MainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {
             Size = UDim2.new(0, 320, 0, 520),
@@ -663,6 +808,8 @@ MinimizeBtn.MouseButton1Click:Connect(function()
         ScrollFrame.Visible = true
         OptimizeAllBtn.Visible = true
         DisableAllBtn.Visible = true
+        SaveBtn.Visible = true
+        ResetBtn.Visible = true
     end
 end)
 
@@ -672,7 +819,7 @@ RunService.RenderStepped:Connect(function()
     local current = tick()
     if current - lastTick >= 1 then
         FPSDisplay.Text = tostring(math.floor(fpsCounter))
-        
+
         if fpsCounter >= 60 then
             FPSDisplay.TextColor3 = Color3.fromRGB(255, 255, 255)
         elseif fpsCounter >= 30 then
@@ -680,7 +827,7 @@ RunService.RenderStepped:Connect(function()
         else
             FPSDisplay.TextColor3 = Color3.fromRGB(120, 120, 120)
         end
-        
+
         fpsCounter = 0
         lastTick = current
     end
@@ -710,7 +857,7 @@ TitleBar.InputEnded:Connect(function()
 end)
 
 -- Monitor new objects
-table.insert(connections, Workspace.DescendantAdded:Connect(function(obj)
+Workspace.DescendantAdded:Connect(function(obj)
     if Settings.DisableShadows and obj:IsA("BasePart") then
         SafeCall(function()
             obj.CastShadow = false
@@ -726,10 +873,10 @@ table.insert(connections, Workspace.DescendantAdded:Connect(function(obj)
             obj.Transparency = 1
         end)
     end
-end))
+end)
 
 -- Monitor character
-table.insert(connections, player.CharacterAdded:Connect(function(char)
+player.CharacterAdded:Connect(function(char)
     if Settings.DisableCharacterEffects then
         wait(1)
         for _, obj in pairs(char:GetDescendants()) do
@@ -740,13 +887,24 @@ table.insert(connections, player.CharacterAdded:Connect(function(char)
             end
         end
     end
-end))
+    if Settings.DisableAnimations then
+        wait(1)
+        SafeCall(function()
+            local humanoid = char:FindFirstChildOfClass("Humanoid")
+            if humanoid then
+                for _, track in pairs(humanoid:GetPlayingAnimationTracks()) do
+                    track:AdjustSpeed(0.5)
+                end
+            end
+        end)
+    end
+end)
 
 -- Keybind to toggle UI (Right Shift)
-table.insert(connections, UserInputService.InputBegan:Connect(function(input, gameProcessed)
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if not gameProcessed and input.KeyCode == Enum.KeyCode.RightShift then
         ScreenGui.Enabled = not ScreenGui.Enabled
     end
-end))
+end)
 
-print("[FPS Optimizer] v6.0 MAXIMUM loaded successfully!")
+print("[FPS Optimizer] v6.0 MAXIMUM with Save System loaded successfully!")
