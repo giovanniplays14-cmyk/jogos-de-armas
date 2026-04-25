@@ -1,20 +1,21 @@
--- ESP + Aim Assist ULTRA FORTE - VERSÃO COMPLETA
--- Com: Team Check fixo, Multi-Part Aim, Speed & Jump Hack
+-- ESP + Aim Assist ULTRA STRONG - FIXED VERSION
+-- With: Save System, Fixed Tabs, Team Check, Multi-Part Aim, Speed & Jump Hack
 
 if getgenv().ESPMokuroRunning then
-    warn("Script já está rodando!")
+    warn("Script already running!")
     return
 end
 getgenv().ESPMokuroRunning = true
 
--- Serviços
+-- Services
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 local TweenService = game:GetService("TweenService")
+local HttpService = game:GetService("HttpService")
 
--- Variáveis globais
+-- Global variables
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
 local Mouse = LocalPlayer:GetMouse()
@@ -25,66 +26,149 @@ end
 
 local Drawing = Drawing or getgenv().Drawing
 if not Drawing then
-    warn("Drawing library não disponível!")
+    warn("Drawing library not available!")
     return
 end
 
-print("✅ Serviços carregados")
+print("[Mokuro Hub] Services loaded")
 
--- CONFIGURAÇÕES ESP
+-- ==================== SAVE SYSTEM ====================
+local SaveSystem = {
+    ConfigName = "MokuroHub_Config_v3",
+    DefaultConfig = {
+        -- Aim Assist
+        AimAssist_Enabled = false,
+        AimAssist_AlwaysOn = false,
+        AimAssist_ShootToActivate = true,
+        AimAssist_TeamCheck = true,
+        AimAssist_LockTarget = false,
+        AimAssist_MagnetMode = false,
+        AimAssist_MultiPart = false,
+        AimAssist_TargetPart = "Head",
+        AimAssist_PriorityMode = "FOV",
+        AimAssist_FOV = 400,
+        AimAssist_MaxDistance = 2000,
+        AimAssist_Smoothness = 0.95,
+        AimAssist_SnapSmoothness = 0.99,
+        AimAssist_WallCheck = false,
+        AimAssist_VisibilityCheck = true,
+        AimAssist_MaxFOVForDistance = 600,
+        
+        -- ESP
+        ESP_Enabled = false,
+        ESP_TeamCheck = false,
+        ESP_Boxes = true,
+        ESP_Names = true,
+        ESP_Distances = true,
+        ESP_Tracers = true,
+        ESP_HealthBar = true,
+        ESP_MaxDistance = 3000,
+        ESP_BoxColor = {R = 255, G = 50, B = 50},
+        ESP_TextColor = {R = 255, G = 255, B = 255},
+        ESP_TextSize = 13,
+        
+        -- Movement
+        Movement_Enabled = false,
+        Movement_SpeedEnabled = false,
+        Movement_SpeedValue = 50,
+        Movement_JumpEnabled = false,
+        Movement_JumpValue = 100,
+        Movement_FlyEnabled = false,
+        Movement_FlySpeed = 100,
+        Movement_NoClip = false,
+        Movement_InfiniteJump = false,
+    }
+}
+
+function SaveSystem:Load()
+    local success, result = pcall(function()
+        if readfile then
+            local data = readfile(self.ConfigName .. ".json")
+            return HttpService:JSONDecode(data)
+        end
+        return nil
+    end)
+    
+    if success and result then
+        print("[SaveSystem] Config loaded successfully")
+        return result
+    else
+        print("[SaveSystem] Using default config")
+        return self.DefaultConfig
+    end
+end
+
+function SaveSystem:Save(config)
+    pcall(function()
+        if writefile then
+            writefile(self.ConfigName .. ".json", HttpService:JSONEncode(config))
+            print("[SaveSystem] Config saved")
+        end
+    end)
+end
+
+function SaveSystem:Reset()
+    pcall(function()
+        if delfile then
+            delfile(self.ConfigName .. ".json")
+        end
+    end)
+    print("[SaveSystem] Config reset")
+    return self.DefaultConfig
+end
+
+-- Load saved config
+local SavedConfig = SaveSystem:Load()
+
+-- ==================== CONFIGS ====================
 local ESP = {
-    Enabled = false,
-    TeamCheck = false,
-    MaxDistance = 3000,
-    BoxColor = Color3.fromRGB(255, 50, 50),
-    TextColor = Color3.fromRGB(255, 255, 255),
-    TextSize = 13,
-    Boxes = true,
-    Names = true,
-    Distances = true,
-    Tracers = true,
-    HealthBar = true
+    Enabled = SavedConfig.ESP_Enabled,
+    TeamCheck = SavedConfig.ESP_TeamCheck,
+    MaxDistance = SavedConfig.ESP_MaxDistance,
+    BoxColor = Color3.fromRGB(SavedConfig.ESP_BoxColor.R, SavedConfig.ESP_BoxColor.G, SavedConfig.ESP_BoxColor.B),
+    TextColor = Color3.fromRGB(SavedConfig.ESP_TextColor.R, SavedConfig.ESP_TextColor.G, SavedConfig.ESP_TextColor.B),
+    TextSize = SavedConfig.ESP_TextSize,
+    Boxes = SavedConfig.ESP_Boxes,
+    Names = SavedConfig.ESP_Names,
+    Distances = SavedConfig.ESP_Distances,
+    Tracers = SavedConfig.ESP_Tracers,
+    HealthBar = SavedConfig.ESP_HealthBar
 }
 
--- CONFIGURAÇÕES AIM ASSIST (MULTI-PART)
 local AimAssist = {
-    Enabled = false,
-    AlwaysOn = false,
-    ShootToActivate = true,
-    TeamCheck = true,
-    Smoothness = 0.95,
-    SnapSmoothness = 0.99,
-    FOV = 400,
-    MaxDistance = 2000,
-    
-    -- NOVO: Sistema de múltiplas partes do corpo
-    TargetPart = "Head", -- Parte principal selecionada
-    MultiPart = false, -- Ativar aim em múltiplas partes
-    PriorityParts = {"Head", "Torso", "HumanoidRootPart"}, -- Ordem de prioridade
-    PartSwitchInterval = 0.5, -- Tempo para trocar de parte (segundos)
-    
-    WallCheck = false,
-    MagnetMode = false,
-    LockTarget = false,
-    PriorityMode = "FOV",
-    MaxFOVForDistance = 600,
-    VisibilityCheck = true
+    Enabled = SavedConfig.AimAssist_Enabled,
+    AlwaysOn = SavedConfig.AimAssist_AlwaysOn,
+    ShootToActivate = SavedConfig.AimAssist_ShootToActivate,
+    TeamCheck = SavedConfig.AimAssist_TeamCheck,
+    Smoothness = SavedConfig.AimAssist_Smoothness,
+    SnapSmoothness = SavedConfig.AimAssist_SnapSmoothness,
+    FOV = SavedConfig.AimAssist_FOV,
+    MaxDistance = SavedConfig.AimAssist_MaxDistance,
+    TargetPart = SavedConfig.AimAssist_TargetPart,
+    MultiPart = SavedConfig.AimAssist_MultiPart,
+    PriorityParts = {"Head", "Torso", "HumanoidRootPart"},
+    PartSwitchInterval = 0.5,
+    WallCheck = SavedConfig.AimAssist_WallCheck,
+    MagnetMode = SavedConfig.AimAssist_MagnetMode,
+    LockTarget = SavedConfig.AimAssist_LockTarget,
+    PriorityMode = SavedConfig.AimAssist_PriorityMode,
+    MaxFOVForDistance = SavedConfig.AimAssist_MaxFOVForDistance,
+    VisibilityCheck = SavedConfig.AimAssist_VisibilityCheck
 }
 
--- NOVO: CONFIGURAÇÕES MOVEMENT (SPEED & JUMP)
 local Movement = {
-    Enabled = false,
-    SpeedEnabled = false,
-    SpeedValue = 50, -- WalkSpeed padrão é 16
-    JumpEnabled = false,
-    JumpValue = 100, -- JumpPower padrão é 50
-    FlyEnabled = false,
-    FlySpeed = 100,
-    NoClip = false,
-    InfiniteJump = false
+    Enabled = SavedConfig.Movement_Enabled,
+    SpeedEnabled = SavedConfig.Movement_SpeedEnabled,
+    SpeedValue = SavedConfig.Movement_SpeedValue,
+    JumpEnabled = SavedConfig.Movement_JumpEnabled,
+    JumpValue = SavedConfig.Movement_JumpValue,
+    FlyEnabled = SavedConfig.Movement_FlyEnabled,
+    FlySpeed = SavedConfig.Movement_FlySpeed,
+    NoClip = SavedConfig.Movement_NoClip,
+    InfiniteJump = SavedConfig.Movement_InfiniteJump
 }
 
--- Variáveis de controle
+-- Control variables
 local ESPObjects = {}
 local CurrentTarget = nil
 local LockedTarget = nil
@@ -96,17 +180,17 @@ local ScreenGui = nil
 local MainFrame = nil
 local CurrentTab = "Aim Assist"
 
--- NOVO: Variáveis para multi-part aim
+-- Multi-part aim variables
 local CurrentPartIndex = 1
 local LastPartSwitch = tick()
 
--- NOVO: Variáveis para movement
+-- Movement variables
 local FlyConnection = nil
 local NoclipConnection = nil
 local OriginalWalkSpeed = 16
 local OriginalJumpPower = 50
 
--- Cores do tema
+-- Theme colors
 local Colors = {
     Background = Color3.fromRGB(15, 15, 15),
     Sidebar = Color3.fromRGB(10, 10, 10),
@@ -123,7 +207,22 @@ local Colors = {
     Warning = Color3.fromRGB(255, 200, 0)
 }
 
--- Funções utilitárias
+-- UI References for updating toggles
+local UIRefs = {
+    Toggles = {},
+    Sliders = {},
+    Dropdowns = {}
+}
+
+-- Utility functions
+local function SafeCall(func)
+    local success, result = pcall(func)
+    if not success then
+        warn("[Mokuro Hub] Error: " .. tostring(result))
+    end
+    return success, result
+end
+
 local function CreateTween(obj, info, properties)
     pcall(function()
         TweenService:Create(obj, info, properties):Play()
@@ -137,7 +236,52 @@ local function CreateCorner(parent, radius)
     return corner
 end
 
--- ==================== SISTEMA DE ESP ====================
+-- ==================== SAVE CURRENT CONFIG ====================
+local function SaveCurrentConfig()
+    local config = {
+        AimAssist_Enabled = AimAssist.Enabled,
+        AimAssist_AlwaysOn = AimAssist.AlwaysOn,
+        AimAssist_ShootToActivate = AimAssist.ShootToActivate,
+        AimAssist_TeamCheck = AimAssist.TeamCheck,
+        AimAssist_LockTarget = AimAssist.LockTarget,
+        AimAssist_MagnetMode = AimAssist.MagnetMode,
+        AimAssist_MultiPart = AimAssist.MultiPart,
+        AimAssist_TargetPart = AimAssist.TargetPart,
+        AimAssist_PriorityMode = AimAssist.PriorityMode,
+        AimAssist_FOV = AimAssist.FOV,
+        AimAssist_MaxDistance = AimAssist.MaxDistance,
+        AimAssist_Smoothness = AimAssist.Smoothness,
+        AimAssist_SnapSmoothness = AimAssist.SnapSmoothness,
+        AimAssist_WallCheck = AimAssist.WallCheck,
+        AimAssist_VisibilityCheck = AimAssist.VisibilityCheck,
+        AimAssist_MaxFOVForDistance = AimAssist.MaxFOVForDistance,
+        
+        ESP_Enabled = ESP.Enabled,
+        ESP_TeamCheck = ESP.TeamCheck,
+        ESP_Boxes = ESP.Boxes,
+        ESP_Names = ESP.Names,
+        ESP_Distances = ESP.Distances,
+        ESP_Tracers = ESP.Tracers,
+        ESP_HealthBar = ESP.HealthBar,
+        ESP_MaxDistance = ESP.MaxDistance,
+        ESP_BoxColor = {R = math.floor(ESP.BoxColor.R * 255), G = math.floor(ESP.BoxColor.G * 255), B = math.floor(ESP.BoxColor.B * 255)},
+        ESP_TextColor = {R = math.floor(ESP.TextColor.R * 255), G = math.floor(ESP.TextColor.G * 255), B = math.floor(ESP.TextColor.B * 255)},
+        ESP_TextSize = ESP.TextSize,
+        
+        Movement_Enabled = Movement.Enabled,
+        Movement_SpeedEnabled = Movement.SpeedEnabled,
+        Movement_SpeedValue = Movement.SpeedValue,
+        Movement_JumpEnabled = Movement.JumpEnabled,
+        Movement_JumpValue = Movement.JumpValue,
+        Movement_FlyEnabled = Movement.FlyEnabled,
+        Movement_FlySpeed = Movement.FlySpeed,
+        Movement_NoClip = Movement.NoClip,
+        Movement_InfiniteJump = Movement.InfiniteJump,
+    }
+    SaveSystem:Save(config)
+end
+
+-- ==================== ESP SYSTEM ====================
 local function CreateESP(player)
     if player == LocalPlayer then return end
     if ESPObjects[player] then return end
@@ -200,25 +344,22 @@ local function RemoveESP(player)
     end
 end
 
--- ==================== TEAM CHECK CORRIGIDO ====================
+-- ==================== TEAM CHECK ====================
 local function IsTeammate(player)
     if not player then return false end
     
-    -- Método 1: Verificar propriedade Team
     if player.Team and LocalPlayer.Team then
         if player.Team == LocalPlayer.Team then
             return true
         end
     end
     
-    -- Método 2: Verificar TeamColor (mais confiável em alguns jogos)
     if player.TeamColor and LocalPlayer.TeamColor then
         if player.TeamColor == LocalPlayer.TeamColor then
             return true
         end
     end
     
-    -- Método 3: Verificar se tem o mesmo parent (para jogos com folders de times)
     if player:FindFirstChild("TeamValue") and LocalPlayer:FindFirstChild("TeamValue") then
         if player.TeamValue.Value == LocalPlayer.TeamValue.Value then
             return true
@@ -246,26 +387,20 @@ local function IsVisible(targetPosition)
     return success and result or true
 end
 
--- ==================== GET CLOSEST PLAYER CORRIGIDO ====================
+-- ==================== GET CLOSEST PLAYER ====================
 local function GetPartFromCharacter(character, partName)
     if not character then return nil end
-    
-    -- Tenta pegar a parte diretamente
     local part = character:FindFirstChild(partName)
     if part then return part end
-    
-    -- Se não achar, tenta variações
     if partName == "Torso" then
         return character:FindFirstChild("UpperTorso") or character:FindFirstChild("LowerTorso")
     end
-    
     return nil
 end
 
 local function GetTargetPart(character)
     if not character then return nil end
     
-    -- Se multi-part estiver ativado, alterna entre as partes
     if AimAssist.MultiPart then
         if tick() - LastPartSwitch > AimAssist.PartSwitchInterval then
             CurrentPartIndex = CurrentPartIndex + 1
@@ -279,13 +414,11 @@ local function GetTargetPart(character)
         local part = GetPartFromCharacter(character, targetPartName)
         if part then return part end
         
-        -- Se a parte atual não existir, tenta as outras
         for _, partName in ipairs(AimAssist.PriorityParts) do
             part = GetPartFromCharacter(character, partName)
             if part then return part end
         end
     else
-        -- Modo single part
         return GetPartFromCharacter(character, AimAssist.TargetPart)
     end
     
@@ -304,7 +437,6 @@ local function GetClosestPlayerByDistance()
     local shortestDistance = AimAssist.MaxDistance
     local centerScreen = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     
-    -- Verifica target travado
     if AimAssist.LockTarget and LockedTarget and LockedTarget.Character then
         local targetPart = GetTargetPart(LockedTarget.Character)
         local humanoid = LockedTarget.Character:FindFirstChildOfClass("Humanoid")
@@ -324,8 +456,6 @@ local function GetClosestPlayerByDistance()
     
     for _, player in pairs(Players:GetPlayers()) do
         if player == LocalPlayer then continue end
-        
-        -- TEAM CHECK CORRIGIDO
         if AimAssist.TeamCheck and IsTeammate(player) then continue end
         
         local character = player.Character
@@ -375,7 +505,6 @@ local function GetClosestPlayerByFOV()
     local shortestScreenDistance = AimAssist.FOV
     local centerScreen = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     
-    -- Verifica target travado
     if AimAssist.LockTarget and LockedTarget and LockedTarget.Character then
         local targetPart = GetTargetPart(LockedTarget.Character)
         local humanoid = LockedTarget.Character:FindFirstChildOfClass("Humanoid")
@@ -390,8 +519,6 @@ local function GetClosestPlayerByFOV()
     
     for _, player in pairs(Players:GetPlayers()) do
         if player == LocalPlayer then continue end
-        
-        -- TEAM CHECK CORRIGIDO
         if AimAssist.TeamCheck and IsTeammate(player) then continue end
         
         local character = player.Character
@@ -455,8 +582,6 @@ local function ApplyAimAssist()
         local targetPart = GetTargetPart(CurrentTarget.Character)
         if targetPart then
             local targetPos = targetPart.Position
-            
-            -- Ajuste de altura baseado na parte
             if targetPart.Name == "Head" then
                 targetPos = targetPos + Vector3.new(0, 0.15, 0)
             end
@@ -500,7 +625,6 @@ local function UpdateESP()
     
     local centerScreen = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     
-    -- Atualizar FOV Circle
     if FOV_Circle then
         local showCircle = AimAssist.AlwaysOn or (AimAssist.Enabled and (IsShooting or not AimAssist.ShootToActivate))
         FOV_Circle.Visible = showCircle
@@ -526,7 +650,6 @@ local function UpdateESP()
         end
     end
     
-    -- Atualizar ESP dos jogadores
     for player, drawings in pairs(ESPObjects) do
         pcall(function()
             if not ESP.Enabled then
@@ -540,7 +663,6 @@ local function UpdateESP()
                 return
             end
             
-            -- TEAM CHECK PARA ESP
             if ESP.TeamCheck and IsTeammate(player) then
                 for _, d in pairs(drawings) do if d then d.Visible = false end end
                 return
@@ -566,7 +688,6 @@ local function UpdateESP()
             local width = size * 0.65
             local height = size * 1.4
             
-            -- Box
             if ESP.Boxes and drawings.Box then
                 drawings.Box.Size = Vector2.new(width, height)
                 drawings.Box.Position = Vector2.new(rootPosition.X - width/2, rootPosition.Y - height/2)
@@ -592,7 +713,6 @@ local function UpdateESP()
                 drawings.Box.Visible = false
             end
             
-            -- Tracer
             if ESP.Tracers and drawings.Tracer then
                 drawings.Tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
                 drawings.Tracer.To = Vector2.new(rootPosition.X, rootPosition.Y + height/2)
@@ -602,7 +722,6 @@ local function UpdateESP()
                 drawings.Tracer.Visible = false
             end
             
-            -- Name
             if ESP.Names and drawings.Name then
                 drawings.Name.Text = player.Name .. (player == CurrentTarget and (IsShooting and " [FIRING]" or " [TARGET]") or "")
                 drawings.Name.Position = Vector2.new(rootPosition.X, rootPosition.Y - height/2 - 18)
@@ -613,7 +732,6 @@ local function UpdateESP()
                 drawings.Name.Visible = false
             end
             
-            -- Distance
             if ESP.Distances and drawings.Distance then
                 drawings.Distance.Text = math.floor(distance) .. "m"
                 drawings.Distance.Position = Vector2.new(rootPosition.X, rootPosition.Y + height/2 + 6)
@@ -622,7 +740,6 @@ local function UpdateESP()
                 drawings.Distance.Visible = false
             end
             
-            -- Health Bar
             if ESP.HealthBar and drawings.HealthBar and drawings.HealthBarBg then
                 local healthPercent = math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1)
                 local barHeight = height * 0.8
@@ -644,7 +761,7 @@ local function UpdateESP()
     end
 end
 
--- ==================== SISTEMA DE MOVEMENT (SPEED & JUMP) ====================
+-- ==================== MOVEMENT SYSTEM ====================
 local function SetupMovement()
     local character = LocalPlayer.Character
     if not character then return end
@@ -652,11 +769,9 @@ local function SetupMovement()
     local humanoid = character:FindFirstChildOfClass("Humanoid")
     if not humanoid then return end
     
-    -- Salvar valores originais
     OriginalWalkSpeed = humanoid.WalkSpeed
     OriginalJumpPower = humanoid.JumpPower
     
-    -- Aplicar valores modificados
     if Movement.SpeedEnabled then
         humanoid.WalkSpeed = Movement.SpeedValue
     else
@@ -679,21 +794,18 @@ local function UpdateMovement()
     local humanoid = character:FindFirstChildOfClass("Humanoid")
     if not humanoid then return end
     
-    -- Speed
     if Movement.SpeedEnabled then
         if humanoid.WalkSpeed ~= Movement.SpeedValue then
             humanoid.WalkSpeed = Movement.SpeedValue
         end
     end
     
-    -- Jump
     if Movement.JumpEnabled then
         if humanoid.JumpPower ~= Movement.JumpValue then
             humanoid.JumpPower = Movement.JumpValue
         end
     end
     
-    -- NoClip
     if Movement.NoClip then
         for _, part in pairs(character:GetDescendants()) do
             if part:IsA("BasePart") then
@@ -703,7 +815,6 @@ local function UpdateMovement()
     end
 end
 
--- Fly System
 local function ToggleFly(enabled)
     if enabled then
         if FlyConnection then FlyConnection:Disconnect() end
@@ -780,9 +891,9 @@ local function ToggleFly(enabled)
     end
 end
 
--- ==================== CRIAR INTERFACE ====================
+-- ==================== CREATE INTERFACE (FIXED) ====================
 local function CreateInterface()
-    print("🎨 Criando interface...")
+    print("[Mokuro Hub] Creating interface...")
     
     local success, err = pcall(function()
         local parent = gethui and gethui() or LocalPlayer:WaitForChild("PlayerGui")
@@ -793,7 +904,7 @@ local function CreateInterface()
         ScreenGui.ResetOnSpawn = false
         ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
         
-        -- Frame Principal
+        -- Main Frame
         MainFrame = Instance.new("Frame")
         MainFrame.Name = "MainFrame"
         MainFrame.Size = UDim2.new(0, 700, 0, 450)
@@ -805,7 +916,7 @@ local function CreateInterface()
         
         CreateCorner(MainFrame, UDim.new(0, 8))
         
-        -- Barra de Título
+        -- Title Bar
         local TitleBar = Instance.new("Frame")
         TitleBar.Name = "TitleBar"
         TitleBar.Size = UDim2.new(1, 0, 0, 40)
@@ -815,7 +926,6 @@ local function CreateInterface()
         
         CreateCorner(TitleBar, UDim.new(0, 8))
         
-        -- Título
         local TitleText = Instance.new("TextLabel")
         TitleText.Size = UDim2.new(0, 200, 1, 0)
         TitleText.Position = UDim2.new(0, 15, 0, 0)
@@ -827,13 +937,13 @@ local function CreateInterface()
         TitleText.TextXAlignment = Enum.TextXAlignment.Left
         TitleText.Parent = TitleBar
         
-        -- Botão Fechar
+        -- Close Button
         local CloseBtn = Instance.new("TextButton")
         CloseBtn.Size = UDim2.new(0, 30, 0, 30)
         CloseBtn.Position = UDim2.new(1, -40, 0.5, -15)
         CloseBtn.BackgroundColor3 = Colors.ElementBg
         CloseBtn.BorderSizePixel = 0
-        CloseBtn.Text = "×"
+        CloseBtn.Text = "X"
         CloseBtn.TextColor3 = Colors.Text
         CloseBtn.TextSize = 20
         CloseBtn.Font = Enum.Font.GothamBold
@@ -842,7 +952,6 @@ local function CreateInterface()
         CreateCorner(CloseBtn, UDim.new(0, 6))
         
         CloseBtn.MouseButton1Click:Connect(function()
-            -- Desativar tudo antes de fechar
             Movement.Enabled = false
             Movement.SpeedEnabled = false
             Movement.JumpEnabled = false
@@ -869,16 +978,16 @@ local function CreateInterface()
         Sidebar.BorderSizePixel = 0
         Sidebar.Parent = MainFrame
         
-        -- Conteúdo
-        local Content = Instance.new("Frame")
-        Content.Name = "Content"
-        Content.Size = UDim2.new(1, -150, 1, -40)
-        Content.Position = UDim2.new(0, 150, 0, 40)
-        Content.BackgroundColor3 = Colors.Background
-        Content.BorderSizePixel = 0
-        Content.Parent = MainFrame
+        -- Content Area (FIXED - this is the container for tab contents)
+        local ContentArea = Instance.new("Frame")
+        ContentArea.Name = "ContentArea"
+        ContentArea.Size = UDim2.new(1, -150, 1, -40)
+        ContentArea.Position = UDim2.new(0, 150, 0, 40)
+        ContentArea.BackgroundColor3 = Colors.Background
+        ContentArea.BorderSizePixel = 0
+        ContentArea.Parent = MainFrame
         
-        -- Abas (AGORA COM 4 ABAS)
+        -- Tabs
         local Tabs = {"Aim Assist", "ESP", "Movement", "Settings"}
         local TabContents = {}
         local TabButtons = {}
@@ -899,38 +1008,52 @@ local function CreateInterface()
             
             TabButtons[tabName] = btn
             
-            local tabContent = Instance.new("ScrollingFrame")
+            -- FIXED: Tab content is a Frame (not ScrollingFrame) inside ContentArea
+            local tabContent = Instance.new("Frame")
             tabContent.Name = tabName .. "Content"
-            tabContent.Size = UDim2.new(1, -20, 1, -20)
-            tabContent.Position = UDim2.new(0, 10, 0, 10)
+            tabContent.Size = UDim2.new(1, 0, 1, 0)
             tabContent.BackgroundTransparency = 1
             tabContent.BorderSizePixel = 0
-            tabContent.ScrollBarThickness = 4
-            tabContent.ScrollBarImageColor3 = Colors.Accent
             tabContent.Visible = i == 1
-            tabContent.Parent = Content
+            tabContent.Parent = ContentArea
             
-            TabContents[tabName] = tabContent
+            -- Scrolling frame INSIDE the tab content
+            local scrollFrame = Instance.new("ScrollingFrame")
+            scrollFrame.Name = "Scroll"
+            scrollFrame.Size = UDim2.new(1, -20, 1, -20)
+            scrollFrame.Position = UDim2.new(0, 10, 0, 10)
+            scrollFrame.BackgroundTransparency = 1
+            scrollFrame.BorderSizePixel = 0
+            scrollFrame.ScrollBarThickness = 4
+            scrollFrame.ScrollBarImageColor3 = Colors.Accent
+            scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 800)
+            scrollFrame.Parent = tabContent
+            
+            local listLayout = Instance.new("UIListLayout")
+            listLayout.Padding = UDim.new(0, 10)
+            listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+            listLayout.Parent = scrollFrame
+            
+            TabContents[tabName] = scrollFrame
             
             btn.MouseButton1Click:Connect(function()
                 CurrentTab = tabName
                 for name, button in pairs(TabButtons) do
                     if name == tabName then
                         button.BackgroundColor3 = Colors.Accent
-                        TabContents[name].Visible = true
+                        TabContents[name].Parent.Visible = true
                     else
                         button.BackgroundColor3 = Colors.ElementBg
-                        TabContents[name].Visible = false
+                        TabContents[name].Parent.Visible = false
                     end
                 end
             end)
         end
         
-        -- FUNÇÃO CRIAR TOGGLE
-        local function CreateToggle(parent, text, default, callback, yPos)
+        -- ==================== CREATE TOGGLE (FIXED) ====================
+        local function CreateToggle(parent, text, default, callback, saveKey)
             local frame = Instance.new("Frame")
             frame.Size = UDim2.new(1, 0, 0, 45)
-            frame.Position = UDim2.new(0, 0, 0, yPos)
             frame.BackgroundColor3 = Colors.ElementBg
             frame.BorderSizePixel = 0
             frame.Parent = parent
@@ -970,29 +1093,38 @@ local function CreateInterface()
             
             local state = default
             
+            local function UpdateVisual()
+                local targetColor = state and Colors.ToggleOn or Colors.ToggleOff
+                local targetPos = state and UDim2.new(1, -21, 0.5, -9) or UDim2.new(0, 3, 0.5, -9)
+                toggleBtn.BackgroundColor3 = targetColor
+                circle.Position = targetPos
+            end
+            
             toggleBtn.MouseButton1Click:Connect(function()
                 state = not state
                 callback(state)
-                
-                local targetColor = state and Colors.ToggleOn or Colors.ToggleOff
-                local targetPos = state and UDim2.new(1, -21, 0.5, -9) or UDim2.new(0, 3, 0.5, -9)
-                
-                CreateTween(toggleBtn, TweenInfo.new(0.25), {BackgroundColor3 = targetColor})
-                CreateTween(circle, TweenInfo.new(0.25), {Position = targetPos})
+                UpdateVisual()
+                SaveCurrentConfig()
             end)
             
-            return frame, function(newState)
-                state = newState
-                toggleBtn.BackgroundColor3 = state and Colors.ToggleOn or Colors.ToggleOff
-                circle.Position = state and UDim2.new(1, -21, 0.5, -9) or UDim2.new(0, 3, 0.5, -9)
+            -- Store reference for external updates
+            if saveKey then
+                UIRefs.Toggles[saveKey] = {
+                    Set = function(newState)
+                        state = newState
+                        UpdateVisual()
+                    end,
+                    Get = function() return state end
+                }
             end
+            
+            return frame
         end
         
-        -- FUNÇÃO CRIAR SLIDER
-        local function CreateSlider(parent, text, min, max, default, callback, yPos)
+        -- ==================== CREATE SLIDER (FIXED) ====================
+        local function CreateSlider(parent, text, min, max, default, callback, saveKey)
             local frame = Instance.new("Frame")
             frame.Size = UDim2.new(1, 0, 0, 60)
-            frame.Position = UDim2.new(0, 0, 0, yPos)
             frame.BackgroundColor3 = Colors.ElementBg
             frame.BorderSizePixel = 0
             frame.Parent = parent
@@ -1031,7 +1163,8 @@ local function CreateInterface()
             CreateCorner(sliderBg, UDim.new(0, 3))
             
             local fill = Instance.new("Frame")
-            fill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
+            local fillPercent = (default - min) / (max - min)
+            fill.Size = UDim2.new(fillPercent, 0, 1, 0)
             fill.BackgroundColor3 = Colors.Accent
             fill.BorderSizePixel = 0
             fill.Parent = sliderBg
@@ -1040,7 +1173,7 @@ local function CreateInterface()
             
             local knob = Instance.new("Frame")
             knob.Size = UDim2.new(0, 14, 0, 14)
-            knob.Position = UDim2.new((default - min) / (max - min), -7, 0.5, -7)
+            knob.Position = UDim2.new(fillPercent, -7, 0.5, -7)
             knob.BackgroundColor3 = Colors.Text
             knob.BorderSizePixel = 0
             knob.Parent = sliderBg
@@ -1058,6 +1191,7 @@ local function CreateInterface()
                 knob.Position = UDim2.new(relativeX, -7, 0.5, -7)
                 
                 callback(value)
+                SaveCurrentConfig()
             end
             
             knob.InputBegan:Connect(function(input)
@@ -1084,13 +1218,25 @@ local function CreateInterface()
                     dragging = false
                 end
             end)
+            
+            if saveKey then
+                UIRefs.Sliders[saveKey] = {
+                    Set = function(value)
+                        valueLabel.Text = tostring(value)
+                        local relativeX = (value - min) / (max - min)
+                        fill.Size = UDim2.new(relativeX, 0, 1, 0)
+                        knob.Position = UDim2.new(relativeX, -7, 0.5, -7)
+                    end
+                }
+            end
+            
+            return frame
         end
         
-        -- FUNÇÃO CRIAR DROPDOWN
-        local function CreateDropdown(parent, text, options, default, callback, yPos)
+        -- ==================== CREATE DROPDOWN (FIXED) ====================
+        local function CreateDropdown(parent, text, options, default, callback, saveKey)
             local frame = Instance.new("Frame")
             frame.Size = UDim2.new(1, 0, 0, 45)
-            frame.Position = UDim2.new(0, 0, 0, yPos)
             frame.BackgroundColor3 = Colors.ElementBg
             frame.BorderSizePixel = 0
             frame.ClipsDescendants = true
@@ -1147,6 +1293,7 @@ local function CreateInterface()
                 optBtn.MouseButton1Click:Connect(function()
                     selectBtn.Text = option
                     callback(option)
+                    SaveCurrentConfig()
                     isOpen = false
                     optionsFrame.Visible = false
                     frame.Size = UDim2.new(1, 0, 0, 45)
@@ -1164,117 +1311,111 @@ local function CreateInterface()
                     optionsFrame.Visible = false
                 end
             end)
+            
+            if saveKey then
+                UIRefs.Dropdowns[saveKey] = {
+                    Set = function(value)
+                        selectBtn.Text = value
+                    end
+                }
+            end
+            
+            return frame
         end
         
-        -- ==================== ABA AIM ASSIST ====================
-        local aimContent = TabContents["Aim Assist"]
-        local yPos = 5
+        -- ==================== AIM ASSIST TAB ====================
+        local aimScroll = TabContents["Aim Assist"]
         
-        CreateToggle(aimContent, "Enable Aim Assist", false, function(state)
+        CreateToggle(aimScroll, "Enable Aim Assist", AimAssist.Enabled, function(state)
             AimAssist.Enabled = state
-        end, yPos)
-        yPos = yPos + 55
+        end, "AimAssist_Enabled")
         
-        CreateToggle(aimContent, "Shoot to Activate", true, function(state)
+        CreateToggle(aimScroll, "Always On", AimAssist.AlwaysOn, function(state)
+            AimAssist.AlwaysOn = state
+        end, "AimAssist_AlwaysOn")
+        
+        CreateToggle(aimScroll, "Shoot to Activate", AimAssist.ShootToActivate, function(state)
             AimAssist.ShootToActivate = state
-        end, yPos)
-        yPos = yPos + 55
+        end, "AimAssist_ShootToActivate")
         
-        -- NOVO: Team Check com verificação melhorada
-        CreateToggle(aimContent, "Team Check (Anti-Teamkill)", true, function(state)
+        CreateToggle(aimScroll, "Team Check (Anti-Teamkill)", AimAssist.TeamCheck, function(state)
             AimAssist.TeamCheck = state
-            print("Team Check: " .. tostring(state))
-        end, yPos)
-        yPos = yPos + 55
+        end, "AimAssist_TeamCheck")
         
-        CreateToggle(aimContent, "Lock Target", false, function(state)
+        CreateToggle(aimScroll, "Lock Target", AimAssist.LockTarget, function(state)
             AimAssist.LockTarget = state
             if not state then LockedTarget = nil end
-        end, yPos)
-        yPos = yPos + 55
+        end, "AimAssist_LockTarget")
         
-        CreateToggle(aimContent, "Magnet Mode", false, function(state)
+        CreateToggle(aimScroll, "Magnet Mode", AimAssist.MagnetMode, function(state)
             AimAssist.MagnetMode = state
-        end, yPos)
-        yPos = yPos + 55
+        end, "AimAssist_MagnetMode")
         
-        -- NOVO: Multi-Part Aim
-        CreateToggle(aimContent, "Multi-Part Aim (Head/Body)", false, function(state)
+        CreateToggle(aimScroll, "Multi-Part Aim (Head/Body)", AimAssist.MultiPart, function(state)
             AimAssist.MultiPart = state
-            print("Multi-Part: " .. tostring(state))
-        end, yPos)
-        yPos = yPos + 55
+        end, "AimAssist_MultiPart")
         
-        CreateDropdown(aimContent, "Primary Target", {"Head", "Torso", "HumanoidRootPart", "LeftArm", "RightArm", "LeftLeg", "RightLeg"}, "Head", function(value)
+        CreateDropdown(aimScroll, "Primary Target", {"Head", "Torso", "HumanoidRootPart", "LeftArm", "RightArm", "LeftLeg", "RightLeg"}, AimAssist.TargetPart, function(value)
             AimAssist.TargetPart = value
-        end, yPos)
-        yPos = yPos + 55
+        end, "AimAssist_TargetPart")
         
-        CreateDropdown(aimContent, "Priority Mode", {"FOV", "Distance"}, "FOV", function(value)
+        CreateDropdown(aimScroll, "Priority Mode", {"FOV", "Distance"}, AimAssist.PriorityMode, function(value)
             AimAssist.PriorityMode = value
-        end, yPos)
-        yPos = yPos + 55
+        end, "AimAssist_PriorityMode")
         
-        CreateSlider(aimContent, "FOV Size", 10, 1500, AimAssist.FOV, function(value)
+        CreateSlider(aimScroll, "FOV Size", 10, 1500, AimAssist.FOV, function(value)
             AimAssist.FOV = value
             if FOV_Circle then FOV_Circle.Radius = value end
-        end, yPos)
-        yPos = yPos + 70
+        end, "AimAssist_FOV")
         
-        CreateSlider(aimContent, "Smoothness", 1, 99, 95, function(value)
+        CreateSlider(aimScroll, "Max Distance", 100, 5000, AimAssist.MaxDistance, function(value)
+            AimAssist.MaxDistance = value
+        end, "AimAssist_MaxDistance")
+        
+        CreateSlider(aimScroll, "Smoothness", 1, 99, math.floor(AimAssist.Smoothness * 100), function(value)
             AimAssist.Smoothness = value / 100
-        end, yPos)
+        end, "AimAssist_Smoothness")
         
-        -- ==================== ABA ESP ====================
-        local espContent = TabContents["ESP"]
-        yPos = 5
+        -- ==================== ESP TAB ====================
+        local espScroll = TabContents["ESP"]
         
-        CreateToggle(espContent, "Enable ESP", false, function(state)
+        CreateToggle(espScroll, "Enable ESP", ESP.Enabled, function(state)
             ESP.Enabled = state
-        end, yPos)
-        yPos = yPos + 55
+        end, "ESP_Enabled")
         
-        -- NOVO: Team Check para ESP
-        CreateToggle(espContent, "Team Check (Hide Teammates)", false, function(state)
+        CreateToggle(espScroll, "Team Check (Hide Teammates)", ESP.TeamCheck, function(state)
             ESP.TeamCheck = state
-        end, yPos)
-        yPos = yPos + 55
+        end, "ESP_TeamCheck")
         
-        CreateToggle(espContent, "Boxes", true, function(state)
+        CreateToggle(espScroll, "Boxes", ESP.Boxes, function(state)
             ESP.Boxes = state
-        end, yPos)
-        yPos = yPos + 55
+        end, "ESP_Boxes")
         
-        CreateToggle(espContent, "Names", true, function(state)
+        CreateToggle(espScroll, "Names", ESP.Names, function(state)
             ESP.Names = state
-        end, yPos)
-        yPos = yPos + 55
+        end, "ESP_Names")
         
-        CreateToggle(espContent, "Tracers", true, function(state)
+        CreateToggle(espScroll, "Tracers", ESP.Tracers, function(state)
             ESP.Tracers = state
-        end, yPos)
-        yPos = yPos + 55
+        end, "ESP_Tracers")
         
-        CreateToggle(espContent, "Health Bar", true, function(state)
+        CreateToggle(espScroll, "Health Bar", ESP.HealthBar, function(state)
             ESP.HealthBar = state
-        end, yPos)
-        yPos = yPos + 55
+        end, "ESP_HealthBar")
         
-        CreateSlider(espContent, "Max Distance", 100, 5000, ESP.MaxDistance, function(value)
+        CreateSlider(espScroll, "Max Distance", 100, 5000, ESP.MaxDistance, function(value)
             ESP.MaxDistance = value
-        end, yPos)
+        end, "ESP_MaxDistance")
         
-        -- ==================== NOVA ABA MOVEMENT ====================
-        local moveContent = TabContents["Movement"]
-        yPos = 5
+        -- ==================== MOVEMENT TAB ====================
+        local moveScroll = TabContents["Movement"]
         
         -- Master Toggle
-        CreateToggle(moveContent, "Enable Movement Mods", false, function(state)
+        CreateToggle(moveScroll, "Enable Movement Mods", Movement.Enabled, function(state)
             Movement.Enabled = state
             if state then
                 SetupMovement()
             else
-                -- Resetar tudo
                 local char = LocalPlayer.Character
                 if char then
                     local hum = char:FindFirstChildOfClass("Humanoid")
@@ -1289,77 +1430,107 @@ local function CreateInterface()
                 Movement.NoClip = false
                 ToggleFly(false)
             end
-        end, yPos)
-        yPos = yPos + 65
+        end, "Movement_Enabled")
         
-        -- Speed Hack
-        CreateToggle(moveContent, "Speed Hack", false, function(state)
+        CreateToggle(moveScroll, "Speed Hack", Movement.SpeedEnabled, function(state)
             Movement.SpeedEnabled = state
             Movement.Enabled = true
             SetupMovement()
-        end, yPos)
-        yPos = yPos + 55
+        end, "Movement_SpeedEnabled")
         
-        CreateSlider(moveContent, "Speed Value", 16, 200, 50, function(value)
+        CreateSlider(moveScroll, "Speed Value", 16, 200, Movement.SpeedValue, function(value)
             Movement.SpeedValue = value
             if Movement.SpeedEnabled then
                 SetupMovement()
             end
-        end, yPos)
-        yPos = yPos + 70
+        end, "Movement_SpeedValue")
         
-        -- Jump Hack
-        CreateToggle(moveContent, "Jump Power Hack", false, function(state)
+        CreateToggle(moveScroll, "Jump Power Hack", Movement.JumpEnabled, function(state)
             Movement.JumpEnabled = state
             Movement.Enabled = true
             SetupMovement()
-        end, yPos)
-        yPos = yPos + 55
+        end, "Movement_JumpEnabled")
         
-        CreateSlider(moveContent, "Jump Value", 50, 300, 100, function(value)
+        CreateSlider(moveScroll, "Jump Value", 50, 300, Movement.JumpValue, function(value)
             Movement.JumpValue = value
             if Movement.JumpEnabled then
                 SetupMovement()
             end
-        end, yPos)
-        yPos = yPos + 70
+        end, "Movement_JumpValue")
         
-        -- Fly
-        CreateToggle(moveContent, "Fly (WASD + Space/Shift)", false, function(state)
+        CreateToggle(moveScroll, "Fly (WASD + Space/Shift)", Movement.FlyEnabled, function(state)
             Movement.FlyEnabled = state
             ToggleFly(state)
-        end, yPos)
-        yPos = yPos + 55
+        end, "Movement_FlyEnabled")
         
-        CreateSlider(moveContent, "Fly Speed", 10, 500, 100, function(value)
+        CreateSlider(moveScroll, "Fly Speed", 10, 500, Movement.FlySpeed, function(value)
             Movement.FlySpeed = value
-        end, yPos)
-        yPos = yPos + 70
+        end, "Movement_FlySpeed")
         
-        -- NoClip
-        CreateToggle(moveContent, "NoClip", false, function(state)
+        CreateToggle(moveScroll, "NoClip", Movement.NoClip, function(state)
             Movement.NoClip = state
-        end, yPos)
-        yPos = yPos + 55
+        end, "Movement_NoClip")
         
-        -- Infinite Jump
-        CreateToggle(moveContent, "Infinite Jump", false, function(state)
+        CreateToggle(moveScroll, "Infinite Jump", Movement.InfiniteJump, function(state)
             Movement.InfiniteJump = state
-        end, yPos)
+        end, "Movement_InfiniteJump")
         
-        -- ==================== ABA SETTINGS ====================
-        local settingsContent = TabContents["Settings"]
+        -- ==================== SETTINGS TAB ====================
+        local settingsScroll = TabContents["Settings"]
         
+        -- Save Config Button
+        local saveBtn = Instance.new("TextButton")
+        saveBtn.Size = UDim2.new(1, 0, 0, 40)
+        saveBtn.Position = UDim2.new(0, 0, 0, 5)
+        saveBtn.BackgroundColor3 = Colors.Accent
+        saveBtn.BorderSizePixel = 0
+        saveBtn.Text = "SAVE CONFIG"
+        saveBtn.TextColor3 = Colors.Text
+        saveBtn.TextSize = 14
+        saveBtn.Font = Enum.Font.GothamBold
+        saveBtn.Parent = settingsScroll
+        
+        CreateCorner(saveBtn, UDim.new(0, 6))
+        
+        saveBtn.MouseButton1Click:Connect(function()
+            SaveCurrentConfig()
+            saveBtn.Text = "SAVED!"
+            wait(1)
+            saveBtn.Text = "SAVE CONFIG"
+        end)
+        
+        -- Reset Config Button
+        local resetBtn = Instance.new("TextButton")
+        resetBtn.Size = UDim2.new(1, 0, 0, 40)
+        resetBtn.Position = UDim2.new(0, 0, 0, 55)
+        resetBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
+        resetBtn.BorderSizePixel = 0
+        resetBtn.Text = "RESET TO DEFAULT"
+        resetBtn.TextColor3 = Colors.Text
+        resetBtn.TextSize = 14
+        resetBtn.Font = Enum.Font.GothamBold
+        resetBtn.Parent = settingsScroll
+        
+        CreateCorner(resetBtn, UDim.new(0, 6))
+        
+        resetBtn.MouseButton1Click:Connect(function()
+            SaveSystem:Reset()
+            resetBtn.Text = "RESET! REJOIN TO APPLY"
+            wait(2)
+            resetBtn.Text = "RESET TO DEFAULT"
+        end)
+        
+        -- Unload Button
         local unloadBtn = Instance.new("TextButton")
         unloadBtn.Size = UDim2.new(1, 0, 0, 40)
-        unloadBtn.Position = UDim2.new(0, 0, 0, 10)
+        unloadBtn.Position = UDim2.new(0, 0, 0, 105)
         unloadBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
         unloadBtn.BorderSizePixel = 0
         unloadBtn.Text = "UNLOAD SCRIPT"
         unloadBtn.TextColor3 = Colors.Text
         unloadBtn.TextSize = 14
         unloadBtn.Font = Enum.Font.GothamBold
-        unloadBtn.Parent = settingsContent
+        unloadBtn.Parent = settingsScroll
         
         CreateCorner(unloadBtn, UDim.new(0, 6))
         
@@ -1379,18 +1550,18 @@ local function CreateInterface()
         
         -- Info
         local infoLabel = Instance.new("TextLabel")
-        infoLabel.Size = UDim2.new(1, -20, 0, 100)
-        infoLabel.Position = UDim2.new(0, 10, 0, 60)
+        infoLabel.Size = UDim2.new(1, -20, 0, 200)
+        infoLabel.Position = UDim2.new(0, 10, 0, 160)
         infoLabel.BackgroundTransparency = 1
-        infoLabel.Text = "🔥 MOKURO HUB v3.0\n\n✅ Team Check Corrigido\n✅ Multi-Part Aim (Head/Body)\n✅ Speed & Jump Hack\n✅ Fly Mode\n\n⌨️ Teclas:\n[Insert] - Esconder/Mostrar\n[F] - Aim Temporário\n[Space] - Pular (Infinite Jump)"
+        infoLabel.Text = "MOKURO HUB v3.0\n\nFeatures:\n- Team Check Fixed\n- Multi-Part Aim (Head/Body)\n- Speed & Jump Hack\n- Fly Mode\n- Config Save System\n\nKeys:\n[Insert] Hide/Show\n[F] Temporary Aim\n[Space] Jump (Infinite Jump)"
         infoLabel.TextColor3 = Colors.TextDark
         infoLabel.TextSize = 11
         infoLabel.Font = Enum.Font.Gotham
         infoLabel.TextWrapped = true
         infoLabel.TextYAlignment = Enum.TextYAlignment.Top
-        infoLabel.Parent = settingsContent
+        infoLabel.Parent = settingsScroll
         
-        -- Dragging
+        -- ==================== DRAGGING ====================
         local dragging = false
         local dragStart = nil
         local startPos = nil
@@ -1416,7 +1587,7 @@ local function CreateInterface()
             end
         end)
         
-        -- Tecla Insert
+        -- Insert key to toggle UI
         UserInputService.InputBegan:Connect(function(input, gameProcessed)
             if gameProcessed then return end
             if input.KeyCode == Enum.KeyCode.Insert then
@@ -1435,16 +1606,15 @@ local function CreateInterface()
             end
         end)
         
-        print("✅ Interface criada com sucesso!")
+        print("[Mokuro Hub] Interface created successfully!")
     end)
     
     if not success then
-        warn("❌ Erro: " .. tostring(err))
+        warn("[Mokuro Hub] Error: " .. tostring(err))
     end
 end
 
--- ==================== INICIALIZAÇÃO ====================
--- Criar FOV Circle
+-- ==================== INITIALIZATION ====================
 pcall(function()
     FOV_Circle = Drawing.new("Circle")
     FOV_Circle.Visible = false
@@ -1456,7 +1626,6 @@ pcall(function()
     FOV_Circle.Color = Colors.Accent
 end)
 
--- Loop principal
 Connection = RunService.RenderStepped:Connect(function()
     pcall(function()
         ApplyAimAssist()
@@ -1465,7 +1634,6 @@ Connection = RunService.RenderStepped:Connect(function()
     end)
 end)
 
--- Eventos de jogadores
 for _, player in pairs(Players:GetPlayers()) do
     if player ~= LocalPlayer then
         CreateESP(player)
@@ -1483,7 +1651,6 @@ Players.PlayerRemoving:Connect(function(player)
     if CurrentTarget == player then CurrentTarget = nil end
 end)
 
--- Detecção de tiro
 Mouse.Button1Down:Connect(function()
     IsShooting = true
     LastClickTime = tick()
@@ -1525,7 +1692,6 @@ UserInputService.InputEnded:Connect(function(input)
     end
 end)
 
--- Check contínuo
 spawn(function()
     while wait(0.05) do
         if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
@@ -1543,16 +1709,11 @@ spawn(function()
     end
 end)
 
--- Respawn handler
 LocalPlayer.CharacterAdded:Connect(function(char)
     wait(1)
-    
-    -- Restaurar movement após respawn
     if Movement.Enabled then
         SetupMovement()
     end
-    
-    -- Recriar ESP
     for _, player in pairs(Players:GetPlayers()) do
         if not ESPObjects[player] then
             CreateESP(player)
@@ -1560,12 +1721,12 @@ LocalPlayer.CharacterAdded:Connect(function(char)
     end
 end)
 
--- Criar interface
 CreateInterface()
 
-print("=== 🔥 MOKURO HUB v3.0 - CARREGADO 🔥 ===")
-print("✅ Novidades:")
-print("  • Team Check corrigido (verifica Team e TeamColor)")
-print("  • Multi-Part Aim (alterna entre Head/Torso/Body)")
-print("  • Nova aba MOVEMENT com Speed/Jump/Fly/NoClip")
-print("⌨️ Teclas: [Insert] Hide/Show | [F] Aim | [Space] Jump")
+print("=== MOKURO HUB v3.0 - LOADED ===")
+print("Features:")
+print("  - Team Check Fixed")
+print("  - Multi-Part Aim")
+print("  - Speed/Jump/Fly/NoClip")
+print("  - CONFIG SAVE SYSTEM")
+print("Keys: [Insert] Hide/Show | [F] Aim | [Space] Jump")
