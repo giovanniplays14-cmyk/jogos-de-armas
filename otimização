@@ -907,4 +907,423 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     end
 end)
 
+-- Server Hop BR - Brazilian Servers Only
+-- Place in any executor
+
+local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+
+-- Config
+local Config = {
+    MaxPlayers = 100,
+    MinPlayers = 1,
+    MaxPing = 300,
+    OnlyBR = true,
+    AutoRetry = true,
+    RetryDelay = 3,
+}
+
+-- Brazilian region codes
+local BRRegions = {
+    "br", "brazil", "sa-east-1", "sa", "south-america",
+}
+
+-- Check if region is BR
+local function IsBrazilian(region)
+    if not region then return false end
+    region = region:lower()
+    for _, br in pairs(BRRegions) do
+        if region:find(br) then
+            return true
+        end
+    end
+    return false
+end
+
+-- Get current place ID
+local PlaceId = game.PlaceId
+local JobId = game.JobId
+
+-- Server list
+local Servers = {}
+local CurrentCursor = ""
+local IsSearching = false
+
+-- Fetch servers from Roblox API
+local function FetchServers(cursor)
+    local url = "https://games.roblox.com/v1/games/" .. PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
+    if cursor and cursor ~= "" then
+        url = url .. "&cursor=" .. cursor
+    end
+
+    local success, result = pcall(function()
+        return game:HttpGet(url)
+    end)
+
+    if success and result then
+        local data = HttpService:JSONDecode(result)
+        return data
+    end
+    return nil
+end
+
+-- Filter BR servers
+local function FilterBRServers(serverList)
+    local brServers = {}
+    for _, server in pairs(serverList) do
+        if server.id ~= JobId then
+            local playerCount = server.playing or 0
+            local maxPlayers = server.maxPlayers or 0
+            local ping = server.ping or 0
+            local region = server.region or ""
+
+            -- Check player count
+            if playerCount >= Config.MinPlayers and playerCount < maxPlayers then
+                -- Check ping
+                if ping <= Config.MaxPing then
+                    -- Check BR region
+                    if not Config.OnlyBR or IsBrazilian(region) then
+                        table.insert(brServers, {
+                            id = server.id,
+                            players = playerCount,
+                            maxPlayers = maxPlayers,
+                            ping = ping,
+                            region = region,
+                            fps = server.fps or 0,
+                        })
+                    end
+                end
+            end
+        end
+    end
+    return brServers
+end
+
+-- Get all BR servers
+local function GetAllBRServers()
+    Servers = {}
+    CurrentCursor = ""
+    IsSearching = true
+
+    print("[ServerHop] Searching for BR servers...")
+
+    local attempts = 0
+    while attempts < 5 do
+        local data = FetchServers(CurrentCursor)
+        if not data then break end
+
+        local filtered = FilterBRServers(data.data or {})
+        for _, server in pairs(filtered) do
+            table.insert(Servers, server)
+        end
+
+        CurrentCursor = data.nextPageCursor or ""
+        if CurrentCursor == "" then break end
+
+        attempts = attempts + 1
+        wait(0.5)
+    end
+
+    IsSearching = false
+    print("[ServerHop] Found " .. #Servers .. " BR servers")
+    return Servers
+end
+
+-- Teleport to server
+local function TeleportToServer(serverId)
+    if not serverId then return false end
+
+    print("[ServerHop] Teleporting to server: " .. serverId:sub(1, 8) .. "...")
+
+    local success = pcall(function()
+        TeleportService:TeleportToPlaceInstance(PlaceId, serverId, LocalPlayer)
+    end)
+
+    return success
+end
+
+-- Hop to random BR server
+local function ServerHop()
+    if IsSearching then
+        print("[ServerHop] Already searching...")
+        return
+    end
+
+    local servers = GetAllBRServers()
+
+    if #servers == 0 then
+        print("[ServerHop] No BR servers found!")
+        if Config.AutoRetry then
+            print("[ServerHop] Retrying in " .. Config.RetryDelay .. "s...")
+            wait(Config.RetryDelay)
+            return ServerHop()
+        end
+        return
+    end
+
+    -- Sort by lowest ping
+    table.sort(servers, function(a, b)
+        return a.ping < b.ping
+    end)
+
+    -- Try top 5 servers
+    for i = 1, math.min(5, #servers) do
+        local server = servers[i]
+        print("[ServerHop] Trying server #" .. i .. " | Players: " .. server.players .. "/" .. server.maxPlayers .. " | Ping: " .. server.ping .. "ms | Region: " .. server.region)
+
+        if TeleportToServer(server.id) then
+            return
+        end
+        wait(1)
+    end
+
+    print("[ServerHop] Failed to join any server")
+end
+
+-- Hop to lowest player count server
+local function ServerHopLowPlayers()
+    if IsSearching then return end
+
+    local servers = GetAllBRServers()
+
+    if #servers == 0 then
+        print("[ServerHop] No BR servers found!")
+        return
+    end
+
+    -- Sort by lowest player count
+    table.sort(servers, function(a, b)
+        return a.players < b.players
+    end)
+
+    for i = 1, math.min(3, #servers) do
+        local server = servers[i]
+        print("[ServerHop] Low players server: " .. server.players .. "/" .. server.maxPlayers)
+        if TeleportToServer(server.id) then
+            return
+        end
+        wait(1)
+    end
+end
+
+-- Hop to specific region
+local function ServerHopRegion(regionCode)
+    Config.OnlyBR = false
+    local oldRegions = BRRegions
+    BRRegions = {regionCode:lower()}
+
+    ServerHop()
+
+    BRRegions = oldRegions
+    Config.OnlyBR = true
+end
+
+-- Auto hop when kicked
+local function AutoRejoin()
+    LocalPlayer.OnTeleport:Connect(function(state)
+        if state == Enum.TeleportState.Failed then
+            print("[ServerHop] Teleport failed, retrying...")
+            wait(Config.RetryDelay)
+            ServerHop()
+        end
+    end)
+end
+
+-- Create simple UI
+local function CreateUI()
+    local ScreenGui = Instance.new("ScreenGui")
+    ScreenGui.Name = "ServerHopBR"
+    ScreenGui.ResetOnSpawn = false
+    ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+    local Frame = Instance.new("Frame")
+    Frame.Size = UDim2.new(0, 250, 0, 200)
+    Frame.Position = UDim2.new(0, 20, 0.5, -100)
+    Frame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+    Frame.BorderSizePixel = 0
+    Frame.Parent = ScreenGui
+
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, 8)
+    Corner.Parent = Frame
+
+    local Title = Instance.new("TextLabel")
+    Title.Size = UDim2.new(1, 0, 0, 35)
+    Title.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+    Title.Text = "SERVER HOP BR"
+    Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Title.Font = Enum.Font.GothamBold
+    Title.TextSize = 14
+    Title.Parent = Frame
+
+    local TitleCorner = Instance.new("UICorner")
+    TitleCorner.CornerRadius = UDim.new(0, 8)
+    TitleCorner.Parent = Title
+
+    -- Hop BR Button
+    local HopBtn = Instance.new("TextButton")
+    HopBtn.Size = UDim2.new(1, -20, 0, 35)
+    HopBtn.Position = UDim2.new(0, 10, 0, 50)
+    HopBtn.BackgroundColor3 = Color3.fromRGB(40, 120, 40)
+    HopBtn.Text = "HOP TO BR SERVER"
+    HopBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    HopBtn.Font = Enum.Font.GothamBold
+    HopBtn.TextSize = 12
+    HopBtn.Parent = Frame
+
+    local HopCorner = Instance.new("UICorner")
+    HopCorner.CornerRadius = UDim.new(0, 6)
+    HopCorner.Parent = HopBtn
+
+    HopBtn.MouseButton1Click:Connect(function()
+        HopBtn.Text = "SEARCHING..."
+        spawn(function()
+            ServerHop()
+            HopBtn.Text = "HOP TO BR SERVER"
+        end)
+    end)
+
+    -- Low Players Button
+    local LowBtn = Instance.new("TextButton")
+    LowBtn.Size = UDim2.new(1, -20, 0, 30)
+    LowBtn.Position = UDim2.new(0, 10, 0, 95)
+    LowBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    LowBtn.Text = "LOW PLAYERS SERVER"
+    LowBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+    LowBtn.Font = Enum.Font.GothamBold
+    LowBtn.TextSize = 11
+    LowBtn.Parent = Frame
+
+    local LowCorner = Instance.new("UICorner")
+    LowCorner.CornerRadius = UDim.new(0, 6)
+    LowCorner.Parent = LowBtn
+
+    LowBtn.MouseButton1Click:Connect(function()
+        LowBtn.Text = "SEARCHING..."
+        spawn(function()
+            ServerHopLowPlayers()
+            LowBtn.Text = "LOW PLAYERS SERVER"
+        end)
+    end)
+
+    -- Auto Rejoin Toggle
+    local AutoBtn = Instance.new("TextButton")
+    AutoBtn.Size = UDim2.new(1, -20, 0, 30)
+    AutoBtn.Position = UDim2.new(0, 10, 0, 135)
+    AutoBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    AutoBtn.Text = "AUTO REJOIN: OFF"
+    AutoBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+    AutoBtn.Font = Enum.Font.GothamBold
+    AutoBtn.TextSize = 11
+    AutoBtn.Parent = Frame
+
+    local AutoCorner = Instance.new("UICorner")
+    AutoCorner.CornerRadius = UDim.new(0, 6)
+    AutoCorner.Parent = AutoBtn
+
+    local autoEnabled = false
+    AutoBtn.MouseButton1Click:Connect(function()
+        autoEnabled = not autoEnabled
+        if autoEnabled then
+            AutoBtn.Text = "AUTO REJOIN: ON"
+            AutoBtn.BackgroundColor3 = Color3.fromRGB(40, 120, 40)
+            AutoRejoin()
+        else
+            AutoBtn.Text = "AUTO REJOIN: OFF"
+            AutoBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+        end
+    end)
+
+    -- Close Button
+    local CloseBtn = Instance.new("TextButton")
+    CloseBtn.Size = UDim2.new(0, 25, 0, 25)
+    CloseBtn.Position = UDim2.new(1, -30, 0, 5)
+    CloseBtn.BackgroundTransparency = 1
+    CloseBtn.Text = "X"
+    CloseBtn.TextColor3 = Color3.fromRGB(150, 150, 150)
+    CloseBtn.Font = Enum.Font.GothamBold
+    CloseBtn.TextSize = 14
+    CloseBtn.Parent = Frame
+
+    CloseBtn.MouseButton1Click:Connect(function()
+        ScreenGui:Destroy()
+    end)
+
+    -- Info
+    local Info = Instance.new("TextLabel")
+    Info.Size = UDim2.new(1, -20, 0, 25)
+    Info.Position = UDim2.new(0, 10, 0, 170)
+    Info.BackgroundTransparency = 1
+    Info.Text = "Key: RightControl to toggle"
+    Info.TextColor3 = Color3.fromRGB(100, 100, 100)
+    Info.Font = Enum.Font.Gotham
+    Info.TextSize = 10
+    Info.Parent = Frame
+
+    -- Toggle UI with key
+    game:GetService("UserInputService").InputBegan:Connect(function(input, gameProcessed)
+        if not gameProcessed and input.KeyCode == Enum.KeyCode.RightControl then
+            ScreenGui.Enabled = not ScreenGui.Enabled
+        end
+    end)
+
+    -- Draggable
+    local dragging = false
+    local dragStart, startPos
+
+    Title.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            dragStart = input.Position
+            startPos = Frame.Position
+        end
+    end)
+
+    game:GetService("UserInputService").InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local delta = input.Position - dragStart
+            Frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+
+    game:GetService("UserInputService").InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
+end
+
+-- Commands
+local function SetupCommands()
+    LocalPlayer.Chatted:Connect(function(msg)
+        local cmd = msg:lower()
+
+        if cmd == "/hopbr" or cmd == "/br" then
+            ServerHop()
+        elseif cmd == "/hoplow" or cmd == "/low" then
+            ServerHopLowPlayers()
+        elseif cmd == "/hop" then
+            Config.OnlyBR = false
+            ServerHop()
+            Config.OnlyBR = true
+        elseif cmd:sub(1, 5) == "/hop " then
+            local region = cmd:sub(6)
+            ServerHopRegion(region)
+        end
+    end)
+end
+
+-- Initialize
+CreateUI()
+SetupCommands()
+
+print("=== SERVER HOP BR LOADED ===")
+print("Commands:")
+print("  /hopbr - Hop to Brazilian server")
+print("  /hoplow - Hop to low players BR server")
+print("  /hop - Hop to any server")
+print("  /hop [region] - Hop to specific region")
+print("Key: RightControl to toggle UI")
 print("[FPS Optimizer] v6.0 MAXIMUM with Save System loaded successfully!")
