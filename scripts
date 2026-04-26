@@ -1,0 +1,2 @@
+loadstring(game:HttpGet("https://raw.githubusercontent.com/giovanniplays14-cmyk/jogos-de-armas/refs/heads/main/script%20jogos%20de%20armas"))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/giovanniplays14-cmyk/jogos-de-armas/refs/heads/main/otimiza%C3%A7%C3%A3o"))()
