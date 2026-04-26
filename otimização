@@ -1,4 +1,4 @@
--- FPS Optimizer v6.0 - MAXIMUM COMPATIBLE WITH SAVE SYSTEM
+-- FPS Optimizer v6.0 + Xeter Hub - TABBED VERSION
 -- Place in StarterPlayerScripts
 
 local Players = game:GetService("Players")
@@ -104,6 +104,8 @@ local connections = {}
 
 -- UI References
 local UIRefs = {}
+local Tabs = {}
+local CurrentTab = "FPS"
 
 -- Utility functions
 local function SafeCall(func)
@@ -433,7 +435,76 @@ for key, value in pairs(Settings) do
     end
 end
 
--- UI CREATION
+-- ==================== XETER HUB SCRIPT ====================
+local XeterScript = [[
+local _ENV = (getgenv or getrenv or getfenv)()
+local CURRENT_VERSION = _ENV.Version or "V3"
+
+local Versions = {
+	V1 = "https://github.com/TlDinhKhoi/Xeter/raw/refs/heads/main/Version/V1.lua",
+	V2 = "https://github.com/TlDinhKhoi/Xeter/raw/refs/heads/main/Version/V2.lua",
+	V3 = "https://github.com/TlDinhKhoi/Xeter/raw/refs/heads/main/Version/V3.lua",
+	V4 = "https://github.com/TlDinhKhoi/Xeter/raw/refs/heads/main/Version/V4.lua",
+}
+
+do
+	local last_exec = _ENV.xeter_execute_debounce
+	if last_exec and (tick() - last_exec) <= 5 then
+		return nil
+	end
+	_ENV.xeter_execute_debounce = tick()
+end
+
+do
+	local executor = syn or fluxus
+	local queueteleport = queue_on_teleport or (executor and executor.queue_on_teleport)
+
+	if not _ENV.xeter_teleport_queue and type(queueteleport) == "function" then
+		_ENV.xeter_teleport_queue = true
+
+		local SourceCode = ("loadstring(game:HttpGet('%s'))()"):format(Versions[CURRENT_VERSION] or Versions.V3)
+
+		pcall(queueteleport, SourceCode)
+	end
+end
+
+local fetcher = {}
+
+local function CreateMessageError(Text)
+	if _ENV.xeter_error_message then
+		_ENV.xeter_error_message:Destroy()
+	end
+	local Message = Instance.new("Message", workspace)
+	Message.Text = Text
+	error(Text, 2)
+end
+
+function fetcher.get(url)
+	local success, response = pcall(function()
+		return game:HttpGet(url)
+	end)
+	if success then
+		return response
+	else
+		CreateMessageError(`[Fetcher Error] Failed to get URL: {url}\n>>{response}<<`)
+	end
+end
+
+function fetcher.load(url)
+	local raw = fetcher.get(url)
+	local func, err = loadstring(raw)
+	if type(func) ~= "function" then
+		CreateMessageError(`[Load Error] Syntax error at: {url}\n>>{err}<<`)
+	else
+		return func
+	end
+end
+
+local versionUrl = Versions[CURRENT_VERSION] or Versions.V3
+return fetcher.load(versionUrl)()
+]]
+
+-- ==================== UI CREATION ====================
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "FPSOptimizer"
 ScreenGui.ResetOnSpawn = false
@@ -442,8 +513,8 @@ ScreenGui.Parent = playerGui
 
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 320, 0, 520)
-MainFrame.Position = UDim2.new(0.5, -160, 0.5, -260)
+MainFrame.Size = UDim2.new(0, 340, 0, 540)
+MainFrame.Position = UDim2.new(0.5, -170, 0.5, -270)
 MainFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
 MainFrame.BorderSizePixel = 0
 MainFrame.ClipsDescendants = true
@@ -454,6 +525,7 @@ Border.Color = Color3.fromRGB(40, 40, 40)
 Border.Thickness = 1
 Border.Parent = MainFrame
 
+-- Title Bar
 local TitleBar = Instance.new("Frame")
 TitleBar.Name = "TitleBar"
 TitleBar.Size = UDim2.new(1, 0, 0, 50)
@@ -463,10 +535,10 @@ TitleBar.Parent = MainFrame
 
 local Title = Instance.new("TextLabel")
 Title.Name = "Title"
-Title.Size = UDim2.new(1, -60, 1, 0)
+Title.Size = UDim2.new(1, -120, 1, 0)
 Title.Position = UDim2.new(0, 20, 0, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "FPS OPTIMIZER"
+Title.Text = "FPS OPTIMIZER + XETER"
 Title.TextColor3 = Color3.fromRGB(255, 255, 255)
 Title.Font = Enum.Font.GothamBold
 Title.TextSize = 14
@@ -475,14 +547,14 @@ Title.Parent = TitleBar
 
 local FPSDisplay = Instance.new("TextLabel")
 FPSDisplay.Name = "FPS"
-FPSDisplay.Size = UDim2.new(0, 80, 0, 30)
-FPSDisplay.Position = UDim2.new(1, -90, 0.5, -15)
+FPSDisplay.Size = UDim2.new(0, 60, 0, 26)
+FPSDisplay.Position = UDim2.new(1, -100, 0.5, -13)
 FPSDisplay.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 FPSDisplay.BorderSizePixel = 0
 FPSDisplay.Text = "60"
 FPSDisplay.TextColor3 = Color3.fromRGB(255, 255, 255)
 FPSDisplay.Font = Enum.Font.GothamBold
-FPSDisplay.TextSize = 16
+FPSDisplay.TextSize = 14
 FPSDisplay.Parent = TitleBar
 
 local MinimizeBtn = Instance.new("TextButton")
@@ -496,16 +568,106 @@ MinimizeBtn.Font = Enum.Font.GothamBold
 MinimizeBtn.TextSize = 20
 MinimizeBtn.Parent = TitleBar
 
+-- Tab Bar
+local TabBar = Instance.new("Frame")
+TabBar.Name = "TabBar"
+TabBar.Size = UDim2.new(1, 0, 0, 36)
+TabBar.Position = UDim2.new(0, 0, 0, 50)
+TabBar.BackgroundColor3 = Color3.fromRGB(8, 8, 8)
+TabBar.BorderSizePixel = 0
+TabBar.Parent = MainFrame
+
+local TabLayout = Instance.new("UIListLayout")
+TabLayout.FillDirection = Enum.FillDirection.Horizontal
+TabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+TabLayout.Padding = UDim.new(0, 4)
+TabLayout.Parent = TabBar
+
+-- Content Container
+local ContentContainer = Instance.new("Frame")
+ContentContainer.Name = "ContentContainer"
+ContentContainer.Size = UDim2.new(1, 0, 1, -86)
+ContentContainer.Position = UDim2.new(0, 0, 0, 86)
+ContentContainer.BackgroundTransparency = 1
+ContentContainer.BorderSizePixel = 0
+ContentContainer.Parent = MainFrame
+
+-- ==================== TAB SYSTEM ====================
+local function CreateTab(name, icon)
+    local TabBtn = Instance.new("TextButton")
+    TabBtn.Name = name .. "Tab"
+    TabBtn.Size = UDim2.new(0, 120, 1, 0)
+    TabBtn.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+    TabBtn.BorderSizePixel = 0
+    TabBtn.Text = name
+    TabBtn.TextColor3 = Color3.fromRGB(120, 120, 120)
+    TabBtn.Font = Enum.Font.GothamBold
+    TabBtn.TextSize = 12
+    TabBtn.AutoButtonColor = false
+    TabBtn.Parent = TabBar
+
+    local TabCorner = Instance.new("UICorner")
+    TabCorner.CornerRadius = UDim.new(0, 4)
+    TabCorner.Parent = TabBtn
+
+    local TabContent = Instance.new("Frame")
+    TabContent.Name = name .. "Content"
+    TabContent.Size = UDim2.new(1, 0, 1, 0)
+    TabContent.BackgroundTransparency = 1
+    TabContent.BorderSizePixel = 0
+    TabContent.Visible = false
+    TabContent.Parent = ContentContainer
+
+    Tabs[name] = {
+        Button = TabBtn,
+        Content = TabContent,
+        Active = false
+    }
+
+    TabBtn.MouseButton1Click:Connect(function()
+        for tabName, tabData in pairs(Tabs) do
+            tabData.Active = false
+            tabData.Content.Visible = false
+            TweenService:Create(tabData.Button, TweenInfo.new(0.2), {
+                BackgroundColor3 = Color3.fromRGB(15, 15, 15),
+                TextColor3 = Color3.fromRGB(120, 120, 120)
+            }):Play()
+        end
+
+        Tabs[name].Active = true
+        Tabs[name].Content.Visible = true
+        TweenService:Create(TabBtn, TweenInfo.new(0.2), {
+            BackgroundColor3 = Color3.fromRGB(30, 30, 30),
+            TextColor3 = Color3.fromRGB(255, 255, 255)
+        }):Play()
+
+        CurrentTab = name
+    end)
+
+    return TabContent
+end
+
+-- Create Tabs
+local FPSContent = CreateTab("FPS", "")
+local XeterContent = CreateTab("Xeter Hub", "")
+
+-- Set FPS as default active
+Tabs["FPS"].Active = true
+Tabs["FPS"].Content.Visible = true
+Tabs["FPS"].Button.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+Tabs["FPS"].Button.TextColor3 = Color3.fromRGB(255, 255, 255)
+
+-- ==================== FPS TAB CONTENT ====================
 local ScrollFrame = Instance.new("ScrollingFrame")
 ScrollFrame.Name = "Scroll"
-ScrollFrame.Size = UDim2.new(1, -40, 1, -210)
-ScrollFrame.Position = UDim2.new(0, 20, 0, 70)
+ScrollFrame.Size = UDim2.new(1, -40, 1, -150)
+ScrollFrame.Position = UDim2.new(0, 20, 0, 10)
 ScrollFrame.BackgroundTransparency = 1
 ScrollFrame.BorderSizePixel = 0
 ScrollFrame.ScrollBarThickness = 2
 ScrollFrame.ScrollBarImageColor3 = Color3.fromRGB(100, 100, 100)
 ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 800)
-ScrollFrame.Parent = MainFrame
+ScrollFrame.Parent = FPSContent
 
 local UIList = Instance.new("UIListLayout")
 UIList.Padding = UDim.new(0, 8)
@@ -681,14 +843,14 @@ CreateToggle("Optimize Camera", "OptimizeCamera", "Default FOV 70")
 local SaveBtn = Instance.new("TextButton")
 SaveBtn.Name = "SaveConfig"
 SaveBtn.Size = UDim2.new(1, -40, 0, 35)
-SaveBtn.Position = UDim2.new(0, 20, 1, -145)
+SaveBtn.Position = UDim2.new(0, 20, 1, -130)
 SaveBtn.BackgroundColor3 = Color3.fromRGB(40, 120, 40)
 SaveBtn.BorderSizePixel = 0
 SaveBtn.Text = "SAVE CONFIG"
 SaveBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 SaveBtn.Font = Enum.Font.GothamBold
 SaveBtn.TextSize = 11
-SaveBtn.Parent = MainFrame
+SaveBtn.Parent = FPSContent
 
 local SaveCorner = Instance.new("UICorner")
 SaveCorner.CornerRadius = UDim.new(0, 4)
@@ -705,14 +867,14 @@ end)
 local ResetBtn = Instance.new("TextButton")
 ResetBtn.Name = "ResetConfig"
 ResetBtn.Size = UDim2.new(0.48, -22, 0, 30)
-ResetBtn.Position = UDim2.new(0, 20, 1, -100)
+ResetBtn.Position = UDim2.new(0, 20, 1, -85)
 ResetBtn.BackgroundColor3 = Color3.fromRGB(120, 40, 40)
 ResetBtn.BorderSizePixel = 0
 ResetBtn.Text = "RESET"
 ResetBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
 ResetBtn.Font = Enum.Font.GothamBold
 ResetBtn.TextSize = 10
-ResetBtn.Parent = MainFrame
+ResetBtn.Parent = FPSContent
 
 local ResetCorner = Instance.new("UICorner")
 ResetCorner.CornerRadius = UDim.new(0, 4)
@@ -729,14 +891,14 @@ end)
 local OptimizeAllBtn = Instance.new("TextButton")
 OptimizeAllBtn.Name = "OptimizeAll"
 OptimizeAllBtn.Size = UDim2.new(1, -40, 0, 45)
-OptimizeAllBtn.Position = UDim2.new(0, 20, 1, -55)
+OptimizeAllBtn.Position = UDim2.new(0, 20, 1, -40)
 OptimizeAllBtn.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 OptimizeAllBtn.BorderSizePixel = 0
 OptimizeAllBtn.Text = "OPTIMIZE ALL"
 OptimizeAllBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
 OptimizeAllBtn.Font = Enum.Font.GothamBold
 OptimizeAllBtn.TextSize = 12
-OptimizeAllBtn.Parent = MainFrame
+OptimizeAllBtn.Parent = FPSContent
 
 local AllCorner = Instance.new("UICorner")
 AllCorner.CornerRadius = UDim.new(0, 4)
@@ -746,14 +908,14 @@ AllCorner.Parent = OptimizeAllBtn
 local DisableAllBtn = Instance.new("TextButton")
 DisableAllBtn.Name = "DisableAll"
 DisableAllBtn.Size = UDim2.new(0.48, -20, 0, 35)
-DisableAllBtn.Position = UDim2.new(0.52, 0, 1, -100)
+DisableAllBtn.Position = UDim2.new(0.52, 0, 1, -85)
 DisableAllBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 DisableAllBtn.BorderSizePixel = 0
 DisableAllBtn.Text = "DISABLE ALL"
 DisableAllBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
 DisableAllBtn.Font = Enum.Font.GothamBold
 DisableAllBtn.TextSize = 11
-DisableAllBtn.Parent = MainFrame
+DisableAllBtn.Parent = FPSContent
 
 local DisCorner = Instance.new("UICorner")
 DisCorner.CornerRadius = UDim.new(0, 4)
@@ -783,33 +945,231 @@ DisableAllBtn.MouseButton1Click:Connect(function()
     SaveCurrentConfig()
 end)
 
--- Minimize/Maximize
+-- ==================== XETER HUB TAB CONTENT ====================
+local XeterTitle = Instance.new("TextLabel")
+XeterTitle.Name = "XeterTitle"
+XeterTitle.Size = UDim2.new(1, -40, 0, 30)
+XeterTitle.Position = UDim2.new(0, 20, 0, 20)
+XeterTitle.BackgroundTransparency = 1
+XeterTitle.Text = "XETER HUB LOADER"
+XeterTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+XeterTitle.Font = Enum.Font.GothamBold
+XeterTitle.TextSize = 16
+XeterTitle.TextXAlignment = Enum.TextXAlignment.Left
+XeterTitle.Parent = XeterContent
+
+local XeterDesc = Instance.new("TextLabel")
+XeterDesc.Name = "XeterDesc"
+XeterDesc.Size = UDim2.new(1, -40, 0, 40)
+XeterDesc.Position = UDim2.new(0, 20, 0, 55)
+XeterDesc.BackgroundTransparency = 1
+XeterDesc.Text = "Execute the Xeter Hub script for Blox Fruits. Select your preferred version below."
+XeterDesc.TextColor3 = Color3.fromRGB(150, 150, 150)
+XeterDesc.Font = Enum.Font.Gotham
+XeterDesc.TextSize = 11
+XeterDesc.TextWrapped = true
+XeterDesc.TextXAlignment = Enum.TextXAlignment.Left
+XeterDesc.Parent = XeterContent
+
+-- Version selector
+local VersionLabel = Instance.new("TextLabel")
+VersionLabel.Name = "VersionLabel"
+VersionLabel.Size = UDim2.new(1, -40, 0, 20)
+VersionLabel.Position = UDim2.new(0, 20, 0, 105)
+VersionLabel.BackgroundTransparency = 1
+VersionLabel.Text = "SELECT VERSION:"
+VersionLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+VersionLabel.Font = Enum.Font.GothamBold
+VersionLabel.TextSize = 11
+VersionLabel.TextXAlignment = Enum.TextXAlignment.Left
+VersionLabel.Parent = XeterContent
+
+local SelectedVersion = "V3"
+local VersionButtons = {}
+
+local function CreateVersionButton(version, position)
+    local Btn = Instance.new("TextButton")
+    Btn.Name = version .. "Btn"
+    Btn.Size = UDim2.new(0, 60, 0, 32)
+    Btn.Position = position
+    Btn.BackgroundColor3 = version == "V3" and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(30, 30, 30)
+    Btn.BorderSizePixel = 0
+    Btn.Text = version
+    Btn.TextColor3 = version == "V3" and Color3.fromRGB(0, 0, 0) or Color3.fromRGB(150, 150, 150)
+    Btn.Font = Enum.Font.GothamBold
+    Btn.TextSize = 12
+    Btn.AutoButtonColor = false
+    Btn.Parent = XeterContent
+
+    local BtnCorner = Instance.new("UICorner")
+    BtnCorner.CornerRadius = UDim.new(0, 6)
+    BtnCorner.Parent = Btn
+
+    VersionButtons[version] = Btn
+
+    Btn.MouseButton1Click:Connect(function()
+        SelectedVersion = version
+        for v, b in pairs(VersionButtons) do
+            TweenService:Create(b, TweenInfo.new(0.2), {
+                BackgroundColor3 = Color3.fromRGB(30, 30, 30),
+                TextColor3 = Color3.fromRGB(150, 150, 150)
+            }):Play()
+        end
+        TweenService:Create(Btn, TweenInfo.new(0.2), {
+            BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+            TextColor3 = Color3.fromRGB(0, 0, 0)
+        }):Play()
+    end)
+
+    return Btn
+end
+
+CreateVersionButton("V1", UDim2.new(0, 20, 0, 135))
+CreateVersionButton("V2", UDim2.new(0, 90, 0, 135))
+CreateVersionButton("V3", UDim2.new(0, 160, 0, 135))
+CreateVersionButton("V4", UDim2.new(0, 230, 0, 135))
+
+-- Execute Button
+local ExecuteBtn = Instance.new("TextButton")
+ExecuteBtn.Name = "ExecuteXeter"
+ExecuteBtn.Size = UDim2.new(1, -40, 0, 50)
+ExecuteBtn.Position = UDim2.new(0, 20, 0, 195)
+ExecuteBtn.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+ExecuteBtn.BorderSizePixel = 0
+ExecuteBtn.Text = "EXECUTE XETER HUB"
+ExecuteBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
+ExecuteBtn.Font = Enum.Font.GothamBold
+ExecuteBtn.TextSize = 14
+ExecuteBtn.AutoButtonColor = false
+ExecuteBtn.Parent = XeterContent
+
+local ExecCorner = Instance.new("UICorner")
+ExecCorner.CornerRadius = UDim.new(0, 8)
+ExecCorner.Parent = ExecuteBtn
+
+local ExecStroke = Instance.new("UIStroke")
+ExecStroke.Color = Color3.fromRGB(80, 80, 80)
+ExecStroke.Thickness = 1
+ExecStroke.Parent = ExecuteBtn
+
+ExecuteBtn.MouseEnter:Connect(function()
+    TweenService:Create(ExecuteBtn, TweenInfo.new(0.2), {
+        BackgroundColor3 = Color3.fromRGB(220, 220, 220)
+    }):Play()
+end)
+
+ExecuteBtn.MouseLeave:Connect(function()
+    TweenService:Create(ExecuteBtn, TweenInfo.new(0.2), {
+        BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    }):Play()
+end)
+
+local Executing = false
+ExecuteBtn.MouseButton1Click:Connect(function()
+    if Executing then return end
+    Executing = true
+
+    ExecuteBtn.Text = "LOADING..."
+    TweenService:Create(ExecuteBtn, TweenInfo.new(0.2), {
+        BackgroundColor3 = Color3.fromRGB(40, 120, 40)
+    }):Play()
+    ExecuteBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+
+    task.spawn(function()
+        local success, err = pcall(function()
+            -- Set version before executing
+            getgenv().Version = SelectedVersion
+            loadstring(XeterScript)()
+        end)
+
+        if success then
+            ExecuteBtn.Text = "LOADED!"
+            TweenService:Create(ExecuteBtn, TweenInfo.new(0.2), {
+                BackgroundColor3 = Color3.fromRGB(40, 120, 40)
+            }):Play()
+        else
+            ExecuteBtn.Text = "ERROR!"
+            TweenService:Create(ExecuteBtn, TweenInfo.new(0.2), {
+                BackgroundColor3 = Color3.fromRGB(120, 40, 40)
+            }):Play()
+            warn("[Xeter Hub Error] " .. tostring(err))
+        end
+
+        wait(2)
+        ExecuteBtn.Text = "EXECUTE XETER HUB"
+        TweenService:Create(ExecuteBtn, TweenInfo.new(0.2), {
+            BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        }):Play()
+        ExecuteBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
+        Executing = false
+    end)
+end)
+
+-- Info Box
+local InfoBox = Instance.new("Frame")
+InfoBox.Name = "InfoBox"
+InfoBox.Size = UDim2.new(1, -40, 0, 120)
+InfoBox.Position = UDim2.new(0, 20, 0, 270)
+InfoBox.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+InfoBox.BorderSizePixel = 0
+InfoBox.Parent = XeterContent
+
+local InfoCorner = Instance.new("UICorner")
+InfoCorner.CornerRadius = UDim.new(0, 6)
+InfoCorner.Parent = InfoBox
+
+local InfoStroke = Instance.new("UIStroke")
+InfoStroke.Color = Color3.fromRGB(30, 30, 30)
+InfoStroke.Thickness = 1
+InfoStroke.Parent = InfoBox
+
+local InfoTitle = Instance.new("TextLabel")
+InfoTitle.Name = "InfoTitle"
+InfoTitle.Size = UDim2.new(1, -20, 0, 20)
+InfoTitle.Position = UDim2.new(0, 10, 0, 10)
+InfoTitle.BackgroundTransparency = 1
+InfoTitle.Text = "INFO"
+InfoTitle.TextColor3 = Color3.fromRGB(200, 200, 200)
+InfoTitle.Font = Enum.Font.GothamBold
+InfoTitle.TextSize = 11
+InfoTitle.TextXAlignment = Enum.TextXAlignment.Left
+InfoTitle.Parent = InfoBox
+
+local InfoText = Instance.new("TextLabel")
+InfoText.Name = "InfoText"
+InfoText.Size = UDim2.new(1, -20, 1, -30)
+InfoText.Position = UDim2.new(0, 10, 0, 30)
+InfoText.BackgroundTransparency = 1
+InfoText.Text = "V1 - Legacy version (oldest)\nV2 - Stable version with basic features\nV3 - Latest stable (RECOMMENDED)\nV4 - Experimental / Beta features\n\nNote: Xeter Hub supports Blox Fruits and may require rejoin after execution."
+InfoText.TextColor3 = Color3.fromRGB(120, 120, 120)
+InfoText.Font = Enum.Font.Gotham
+InfoText.TextSize = 10
+InfoText.TextWrapped = true
+InfoText.TextXAlignment = Enum.TextXAlignment.Left
+InfoText.TextYAlignment = Enum.TextYAlignment.Top
+InfoText.Parent = InfoBox
+
+-- ==================== MINIMIZE / DRAG ====================
 local minimized = false
 MinimizeBtn.MouseButton1Click:Connect(function()
     minimized = not minimized
     if minimized then
         TweenService:Create(MainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {
-            Size = UDim2.new(0, 320, 0, 50),
-            Position = UDim2.new(0.5, -160, 0.5, -25)
+            Size = UDim2.new(0, 340, 0, 50),
+            Position = UDim2.new(0.5, -170, 0.5, -25)
         }):Play()
         MinimizeBtn.Text = "+"
-        ScrollFrame.Visible = false
-        OptimizeAllBtn.Visible = false
-        DisableAllBtn.Visible = false
-        SaveBtn.Visible = false
-        ResetBtn.Visible = false
+        TabBar.Visible = false
+        ContentContainer.Visible = false
     else
         TweenService:Create(MainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {
-            Size = UDim2.new(0, 320, 0, 520),
-            Position = UDim2.new(0.5, -160, 0.5, -260)
+            Size = UDim2.new(0, 340, 0, 540),
+            Position = UDim2.new(0.5, -170, 0.5, -270)
         }):Play()
         MinimizeBtn.Text = "-"
         wait(0.1)
-        ScrollFrame.Visible = true
-        OptimizeAllBtn.Visible = true
-        DisableAllBtn.Visible = true
-        SaveBtn.Visible = true
-        ResetBtn.Visible = true
+        TabBar.Visible = true
+        ContentContainer.Visible = true
     end
 end)
 
@@ -907,4 +1267,4 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     end
 end)
 
-print("[FPS Optimizer] v6.0 MAXIMUM with Save System loaded successfully!")
+print("[FPS Optimizer + Xeter Hub] v6.0 Tabbed Version loaded successfully!")
