@@ -1,11 +1,14 @@
 -- ESP + Aim Assist ULTRA STRONG - FIXED VERSION
 -- With: Save System, Fixed Tabs, Team Check, Multi-Part Aim, Speed & Jump Hack
 
-if getgenv().ESPMokuroRunning then
-    warn("Script already running!")
+-- Ambiente do executor
+local Env = (getgenv and getgenv()) or _G
+
+if Env.ESPMokuroRunning then
+    warn("Mokuro Hub já está em execução. Feche a interface antiga antes de iniciar outra.")
     return
 end
-getgenv().ESPMokuroRunning = true
+Env.ESPMokuroRunning = true
 
 -- Services
 local Players = game:GetService("Players")
@@ -24,13 +27,15 @@ if not LocalPlayer.Character then
     LocalPlayer.CharacterAdded:Wait()
 end
 
-local Drawing = Drawing or getgenv().Drawing
-if not Drawing then
-    warn("Drawing library not available!")
+local DrawingLibrary = Drawing or Env.Drawing
+if not DrawingLibrary then
+    Env.ESPMokuroRunning = nil
+    warn("Mokuro Hub: este executor não disponibiliza a biblioteca Drawing; o painel não pode ser iniciado nele.")
     return
 end
+local Drawing = DrawingLibrary
 
-print("[Mokuro Hub] Services loaded")
+print("[Mokuro Hub] Serviços carregados")
 
 -- ==================== SAVE SYSTEM ====================
 local SaveSystem = {
@@ -46,6 +51,7 @@ local SaveSystem = {
         AimAssist_MultiPart = false,
         AimAssist_TargetPart = "Head",
         AimAssist_PriorityMode = "FOV",
+        AimAssist_LowestHealthPriority = false,
         AimAssist_FOV = 400,
         AimAssist_MaxDistance = 2000,
         AimAssist_Smoothness = 0.95,
@@ -90,10 +96,10 @@ function SaveSystem:Load()
     end)
     
     if success and result then
-        print("[SaveSystem] Config loaded successfully")
+        print("[Sistema de salvamento] Configuração carregada com sucesso")
         return result
     else
-        print("[SaveSystem] Using default config")
+        print("[Sistema de salvamento] Usando configuração padrão")
         return self.DefaultConfig
     end
 end
@@ -102,7 +108,7 @@ function SaveSystem:Save(config)
     pcall(function()
         if writefile then
             writefile(self.ConfigName .. ".json", HttpService:JSONEncode(config))
-            print("[SaveSystem] Config saved")
+            print("[Sistema de salvamento] Configuração salva")
         end
     end)
 end
@@ -113,7 +119,7 @@ function SaveSystem:Reset()
             delfile(self.ConfigName .. ".json")
         end
     end)
-    print("[SaveSystem] Config reset")
+    print("[Sistema de salvamento] Configuração restaurada")
     return self.DefaultConfig
 end
 
@@ -151,9 +157,11 @@ local AimAssist = {
     WallCheck = SavedConfig.AimAssist_WallCheck,
     MagnetMode = SavedConfig.AimAssist_MagnetMode,
     LockTarget = SavedConfig.AimAssist_LockTarget,
-    PriorityMode = SavedConfig.AimAssist_PriorityMode,
+    PriorityMode = (SavedConfig.AimAssist_PriorityMode == "Distance" and "Distance" or "FOV"),
+    LowestHealthPriority = SavedConfig.AimAssist_LowestHealthPriority == true,
     MaxFOVForDistance = SavedConfig.AimAssist_MaxFOVForDistance,
-    VisibilityCheck = SavedConfig.AimAssist_VisibilityCheck
+    VisibilityCheck = SavedConfig.AimAssist_VisibilityCheck,
+    SelectedPlayerName = "Automático"
 }
 
 local Movement = {
@@ -248,6 +256,7 @@ local function SaveCurrentConfig()
         AimAssist_MultiPart = AimAssist.MultiPart,
         AimAssist_TargetPart = AimAssist.TargetPart,
         AimAssist_PriorityMode = AimAssist.PriorityMode,
+        AimAssist_LowestHealthPriority = AimAssist.LowestHealthPriority,
         AimAssist_FOV = AimAssist.FOV,
         AimAssist_MaxDistance = AimAssist.MaxDistance,
         AimAssist_Smoothness = AimAssist.Smoothness,
@@ -554,8 +563,85 @@ local function GetClosestPlayerByFOV()
     return closestPlayer
 end
 
+local function GetSelectedPlayer()
+    if not AimAssist.SelectedPlayerName or AimAssist.SelectedPlayerName == "Automático" then
+        return nil, false
+    end
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player.Name == AimAssist.SelectedPlayerName then
+            if player == LocalPlayer or (AimAssist.TeamCheck and IsTeammate(player)) then return nil, true end
+            local character = player.Character
+            local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+            local part = character and GetTargetPart(character)
+            if not character or not humanoid or humanoid.Health <= 0 or not part then return nil, true end
+            if LocalPlayer.Character then
+                local myRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart") or LocalPlayer.Character:FindFirstChild("Torso")
+                if myRoot and (myRoot.Position - part.Position).Magnitude > AimAssist.MaxDistance then return nil, true end
+            end
+            if AimAssist.VisibilityCheck and not IsVisible(part.Position) then return nil, true end
+            return player, true
+        end
+    end
+    return nil, true
+end
+
+local function GetPlayerWithLowestHealth()
+    if not LocalPlayer.Character then return nil end
+
+    local myHumanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+    local myRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart") or LocalPlayer.Character:FindFirstChild("Torso")
+    if not myHumanoid or not myRoot or myHumanoid.Health <= 0 then return nil end
+
+    local lowestPlayer = nil
+    local lowestHealthRatio = math.huge
+    local centerScreen = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player == LocalPlayer then continue end
+        if AimAssist.TeamCheck and IsTeammate(player) then continue end
+
+        local character = player.Character
+        if not character then continue end
+
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        local targetPart = GetTargetPart(character)
+        if not humanoid or not targetPart or humanoid.Health <= 0 or humanoid.MaxHealth <= 0 then continue end
+
+        local distance3D = (myRoot.Position - targetPart.Position).Magnitude
+        if distance3D > AimAssist.MaxDistance then continue end
+
+        local success, screenPos, onScreen = pcall(function()
+            return Camera:WorldToViewportPoint(targetPart.Position)
+        end)
+        if not success or not onScreen then continue end
+
+        local screenDistance = (Vector2.new(screenPos.X, screenPos.Y) - centerScreen).Magnitude
+        local allowedFOV = AimAssist.PriorityMode == "Distance"
+            and AimAssist.MaxFOVForDistance or AimAssist.FOV
+        if screenDistance > allowedFOV then continue end
+        if AimAssist.VisibilityCheck and not IsVisible(targetPart.Position) then continue end
+
+        -- Compara a porcentagem de vida, para não favorecer jogadores com
+        -- menos vida máxima apenas por terem um valor absoluto menor.
+        local healthRatio = humanoid.Health / humanoid.MaxHealth
+        if healthRatio < lowestHealthRatio then
+            lowestHealthRatio = healthRatio
+            lowestPlayer = player
+        end
+    end
+
+    return lowestPlayer
+end
+
 local function GetClosestPlayer()
-    if AimAssist.PriorityMode == "Distance" then
+    local selectedPlayer, hasManualSelection = GetSelectedPlayer()
+    if hasManualSelection then return selectedPlayer end
+
+    if AimAssist.LowestHealthPriority then
+        -- Função adicional: escolhe o de menor vida dentro dos limites do modo de prioridade selecionado.
+        LockedTarget = nil
+        return GetPlayerWithLowestHealth()
+    elseif AimAssist.PriorityMode == "Distance" then
         return GetClosestPlayerByDistance()
     else
         return GetClosestPlayerByFOV()
@@ -587,7 +673,7 @@ local function ApplyAimAssist()
             end
             
             local cameraCF = Camera.CFrame
-            local targetCF = CFrame.new(cameraCF.Position, targetPos)
+            local targetCF = CFrame.lookAt(cameraCF.Position, targetPos)
             
             local success, screenPos = pcall(function()
                 return Camera:WorldToViewportPoint(targetPos)
@@ -816,59 +902,104 @@ local function UpdateMovement()
 end
 
 local function ToggleFly(enabled)
+    -- O voo permanece ativo e recria seus controladores se uma habilidade
+    -- substituir o HumanoidRootPart ou remover os BodyMovers.
+    local flyGyro = nil
+    local flyVelocity = nil
+    local flyRootPart = nil
+
+    local function RemoveFlyMovers()
+        if flyGyro then
+            pcall(function() flyGyro:Destroy() end)
+            flyGyro = nil
+        end
+        if flyVelocity then
+            pcall(function() flyVelocity:Destroy() end)
+            flyVelocity = nil
+        end
+        flyRootPart = nil
+    end
+
     if enabled then
-        if FlyConnection then FlyConnection:Disconnect() end
-        
-        local character = LocalPlayer.Character
-        if not character then return end
-        
-        local humanoid = character:FindFirstChildOfClass("Humanoid")
-        local rootPart = character:FindFirstChild("HumanoidRootPart")
-        if not humanoid or not rootPart then return end
-        
-        local bodyGyro = Instance.new("BodyGyro")
-        bodyGyro.P = 9e4
-        bodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
-        bodyGyro.CFrame = rootPart.CFrame
-        bodyGyro.Parent = rootPart
-        
-        local bodyVelocity = Instance.new("BodyVelocity")
-        bodyVelocity.Velocity = Vector3.new(0, 0, 0)
-        bodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-        bodyVelocity.Parent = rootPart
-        
+        if FlyConnection then
+            FlyConnection:Disconnect()
+            FlyConnection = nil
+        end
+
+        RemoveFlyMovers()
+
+        local function AttachFlyMovers(rootPart)
+            RemoveFlyMovers()
+            flyRootPart = rootPart
+
+            flyGyro = Instance.new("BodyGyro")
+            flyGyro.Name = "MokuroFlyGyro"
+            flyGyro.P = 9e4
+            flyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+            flyGyro.CFrame = rootPart.CFrame
+            flyGyro.Parent = rootPart
+
+            flyVelocity = Instance.new("BodyVelocity")
+            flyVelocity.Name = "MokuroFlyVelocity"
+            flyVelocity.Velocity = Vector3.zero
+            flyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+            flyVelocity.Parent = rootPart
+        end
+
         FlyConnection = RunService.RenderStepped:Connect(function()
             if not Movement.FlyEnabled then
-                if bodyGyro then bodyGyro:Destroy() end
-                if bodyVelocity then bodyVelocity:Destroy() end
+                RemoveFlyMovers()
+                if FlyConnection then
+                    FlyConnection:Disconnect()
+                    FlyConnection = nil
+                end
                 return
             end
-            
-            local cameraCF = Camera.CFrame
-            local direction = Vector3.new(0, 0, 0)
-            
+
+            local character = LocalPlayer.Character
+            local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+            local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+            if not character or not rootPart or not humanoid or humanoid.Health <= 0 then
+                RemoveFlyMovers()
+                return -- tenta novamente no próximo frame; não desativa Movement.FlyEnabled
+            end
+
+            if flyRootPart ~= rootPart
+                or not flyGyro or not flyGyro.Parent
+                or not flyVelocity or not flyVelocity.Parent then
+                AttachFlyMovers(rootPart)
+            end
+
+            local cameraCF = (Workspace.CurrentCamera or Camera).CFrame
+            local direction = Vector3.zero
+
             if UserInputService:IsKeyDown(Enum.KeyCode.W) then
-                direction = direction + cameraCF.LookVector
+                direction += cameraCF.LookVector
             end
             if UserInputService:IsKeyDown(Enum.KeyCode.S) then
-                direction = direction - cameraCF.LookVector
+                direction -= cameraCF.LookVector
             end
             if UserInputService:IsKeyDown(Enum.KeyCode.A) then
-                direction = direction - cameraCF.RightVector
+                direction -= cameraCF.RightVector
             end
             if UserInputService:IsKeyDown(Enum.KeyCode.D) then
-                direction = direction + cameraCF.RightVector
+                direction += cameraCF.RightVector
             end
             if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
-                direction = direction + Vector3.new(0, 1, 0)
+                direction += Vector3.new(0, 1, 0)
             end
             if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
-                direction = direction - Vector3.new(0, 1, 0)
+                direction -= Vector3.new(0, 1, 0)
             end
-            
-            if bodyVelocity and bodyGyro then
-                bodyVelocity.Velocity = direction * Movement.FlySpeed
-                bodyGyro.CFrame = cameraCF
+
+            -- Normaliza para que diagonais não fiquem mais rápidas.
+            if direction.Magnitude > 0 then
+                direction = direction.Unit
+            end
+
+            if flyVelocity and flyGyro then
+                flyVelocity.Velocity = direction * Movement.FlySpeed
+                flyGyro.CFrame = cameraCF
             end
         end)
     else
@@ -876,15 +1007,14 @@ local function ToggleFly(enabled)
             FlyConnection:Disconnect()
             FlyConnection = nil
         end
-        
+        RemoveFlyMovers()
+
+        -- Limpa apenas os controladores criados por este script.
         local character = LocalPlayer.Character
         if character then
-            local rootPart = character:FindFirstChild("HumanoidRootPart")
-            if rootPart then
-                for _, child in pairs(rootPart:GetChildren()) do
-                    if child:IsA("BodyGyro") or child:IsA("BodyVelocity") then
-                        child:Destroy()
-                    end
+            for _, descendant in ipairs(character:GetDescendants()) do
+                if descendant.Name == "MokuroFlyGyro" or descendant.Name == "MokuroFlyVelocity" then
+                    pcall(function() descendant:Destroy() end)
                 end
             end
         end
@@ -893,7 +1023,7 @@ end
 
 -- ==================== CREATE INTERFACE (FIXED) ====================
 local function CreateInterface()
-    print("[Mokuro Hub] Creating interface...")
+    print("[Mokuro Hub] Criando painel...")
     
     local success, err = pcall(function()
         local parent = gethui and gethui() or LocalPlayer:WaitForChild("PlayerGui")
@@ -937,6 +1067,29 @@ local function CreateInterface()
         TitleText.TextXAlignment = Enum.TextXAlignment.Left
         TitleText.Parent = TitleBar
         
+        -- Botões para aumentar ou diminuir o painel
+        local function CreateResizeButton(buttonText, xOffset, delta)
+            local resizeBtn = Instance.new("TextButton")
+            resizeBtn.Size = UDim2.new(0, 28, 0, 28)
+            resizeBtn.Position = UDim2.new(1, xOffset, 0.5, -14)
+            resizeBtn.BackgroundColor3 = Colors.ElementBg
+            resizeBtn.BorderSizePixel = 0
+            resizeBtn.Text = buttonText
+            resizeBtn.TextColor3 = Colors.Text
+            resizeBtn.TextSize = 18
+            resizeBtn.Font = Enum.Font.GothamBold
+            resizeBtn.Parent = TitleBar
+            CreateCorner(resizeBtn, UDim.new(0, 5))
+            resizeBtn.MouseButton1Click:Connect(function()
+                local w = math.clamp(MainFrame.Size.X.Offset + delta, 600, 1000)
+                local h = math.clamp(MainFrame.Size.Y.Offset + math.floor(delta * 0.65), 400, 700)
+                MainFrame.Size = UDim2.new(0, w, 0, h)
+                MainFrame.Position = UDim2.new(0.5, -w / 2, 0.5, -h / 2)
+            end)
+        end
+        CreateResizeButton("+", -78, 60)
+        CreateResizeButton("-", -112, -60)
+
         -- Close Button
         local CloseBtn = Instance.new("TextButton")
         CloseBtn.Size = UDim2.new(0, 30, 0, 30)
@@ -960,7 +1113,7 @@ local function CreateInterface()
             ToggleFly(false)
             
             ScreenGui:Destroy()
-            getgenv().ESPMokuroRunning = false
+            Env.ESPMokuroRunning = nil
             if Connection then Connection:Disconnect() end
             if FOV_Circle then FOV_Circle:Remove() end
             for _, obj in pairs(ESPObjects) do
@@ -988,7 +1141,14 @@ local function CreateInterface()
         ContentArea.Parent = MainFrame
         
         -- Tabs
-        local Tabs = {"Aim Assist", "ESP", "Movement", "Settings"}
+        local Tabs = {"Aim Assist", "ESP", "Movement", "Atalhos", "Settings"}
+        local TabLabels = {
+            ["Aim Assist"] = "Auxílio de mira",
+            ["ESP"] = "ESP",
+            ["Movement"] = "Movimentação",
+            ["Atalhos"] = "Atalhos",
+            ["Settings"] = "Configurações"
+        }
         local TabContents = {}
         local TabButtons = {}
         
@@ -998,7 +1158,7 @@ local function CreateInterface()
             btn.Position = UDim2.new(0, 10, 0, 10 + (i-1) * 45)
             btn.BackgroundColor3 = i == 1 and Colors.Accent or Colors.ElementBg
             btn.BorderSizePixel = 0
-            btn.Text = tabName
+            btn.Text = TabLabels[tabName] or tabName
             btn.TextColor3 = Colors.Text
             btn.TextSize = 12
             btn.Font = Enum.Font.GothamSemibold
@@ -1026,7 +1186,8 @@ local function CreateInterface()
             scrollFrame.BorderSizePixel = 0
             scrollFrame.ScrollBarThickness = 4
             scrollFrame.ScrollBarImageColor3 = Colors.Accent
-            scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 800)
+            scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+            scrollFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
             scrollFrame.Parent = tabContent
             
             local listLayout = Instance.new("UIListLayout")
@@ -1050,6 +1211,67 @@ local function CreateInterface()
             end)
         end
         
+        local HelpDescriptions = {
+            ["Ativar auxílio de mira"] = "Liga ou desliga o auxílio de mira.",
+            ["Sempre ativado"] = "Mantém a mira ativa sem precisar segurar o botão de tiro.",
+            ["Ativar ao atirar"] = "Só aplica o auxílio enquanto você estiver atirando.",
+            ["Verificar equipe (não mirar em aliados)"] = "Ignora jogadores da sua equipe.",
+            ["Fixar alvo"] = "Mantém o alvo atual enquanto ele continuar válido.",
+            ["Modo magnético"] = "Aumenta a força de aproximação da câmera em direção ao alvo.",
+            ["Mira em várias partes (cabeça/corpo)"] = "Alterna entre cabeça e partes do corpo.",
+            ["Parte principal do alvo"] = "Escolhe a parte do personagem usada como referência da mira.",
+            ["Selecionar jogador específico"] = "Escolhe um jogador pelo nome. Use Automático para voltar à seleção normal.",
+            ["Modo de prioridade"] = "FOV prioriza quem está perto do centro da tela; Distância prioriza quem está mais perto de você.",
+            ["Tamanho do campo de visão"] = "Define o raio da área da tela usada para encontrar alvos.",
+            ["Distância máxima"] = "Limita a distância máxima para considerar um jogador.",
+            ["Suavidade da mira"] = "Controla a suavidade do movimento da câmera em direção ao alvo.",
+            ["Ativar ESP"] = "Mostra informações visuais sobre outros jogadores.",
+            ["Verificar equipe (ocultar aliados)"] = "Oculta o ESP dos jogadores da sua equipe.",
+            ["Caixas"] = "Desenha uma caixa ao redor dos personagens.",
+            ["Nomes"] = "Exibe o nome dos jogadores.",
+            ["Linhas até os jogadores"] = "Desenha linhas da tela até os jogadores.",
+            ["Barra de vida"] = "Mostra a vida dos personagens.",
+            ["Ativar modificações de movimento"] = "Ativa as modificações de movimentação.",
+            ["Aumentar velocidade"] = "Permite usar a velocidade definida abaixo.",
+            ["Valor da velocidade"] = "Define a velocidade de caminhada.",
+            ["Aumentar força do pulo"] = "Permite alterar a força do pulo.",
+            ["Força do pulo"] = "Define a força do salto.",
+            ["Voar (WASD + Espaço/Shift)"] = "Ativa o voo. WASD move, Espaço sobe e Shift desce.",
+            ["Velocidade de voo"] = "Define a velocidade durante o voo.",
+            ["Atravessar objetos (NoClip)"] = "Permite atravessar partes e obstáculos.",
+            ["Pulo infinito"] = "Permite pular repetidamente no ar."
+        }
+
+        local function CreateInfoButton(parent, description, xOffset)
+            if not description then return end
+            local infoBtn = Instance.new("TextButton")
+            infoBtn.Size = UDim2.new(0, 20, 0, 20)
+            infoBtn.Position = UDim2.new(1, xOffset, 0.5, -10)
+            infoBtn.BackgroundColor3 = Colors.Background
+            infoBtn.BorderSizePixel = 0
+            infoBtn.Text = "?"
+            infoBtn.TextColor3 = Colors.Accent
+            infoBtn.TextSize = 13
+            infoBtn.Font = Enum.Font.GothamBold
+            infoBtn.Parent = parent
+            CreateCorner(infoBtn, UDim.new(1, 0))
+            local tip = Instance.new("TextLabel")
+            tip.Size = UDim2.new(1, -20, 0, 48)
+            tip.Position = UDim2.new(0, 10, 1, -54)
+            tip.BackgroundColor3 = Colors.Sidebar
+            tip.BorderSizePixel = 0
+            tip.Text = description
+            tip.TextColor3 = Colors.Text
+            tip.TextSize = 11
+            tip.Font = Enum.Font.Gotham
+            tip.TextWrapped = true
+            tip.Visible = false
+            tip.ZIndex = 5
+            tip.Parent = parent
+            CreateCorner(tip, UDim.new(0, 5))
+            infoBtn.MouseButton1Click:Connect(function() tip.Visible = not tip.Visible end)
+        end
+
         -- ==================== CREATE TOGGLE (FIXED) ====================
         local function CreateToggle(parent, text, default, callback, saveKey)
             local frame = Instance.new("Frame")
@@ -1059,6 +1281,7 @@ local function CreateInterface()
             frame.Parent = parent
             
             CreateCorner(frame, UDim.new(0, 6))
+            CreateInfoButton(frame, HelpDescriptions[text], -82)
             
             local label = Instance.new("TextLabel")
             label.Size = UDim2.new(0.6, 0, 1, 0)
@@ -1110,6 +1333,8 @@ local function CreateInterface()
             -- Store reference for external updates
             if saveKey then
                 UIRefs.Toggles[saveKey] = {
+                    Label = text,
+                    Apply = callback,
                     Set = function(newState)
                         state = newState
                         UpdateVisual()
@@ -1130,6 +1355,7 @@ local function CreateInterface()
             frame.Parent = parent
             
             CreateCorner(frame, UDim.new(0, 6))
+            CreateInfoButton(frame, HelpDescriptions[text], -12)
             
             local label = Instance.new("TextLabel")
             label.Size = UDim2.new(0.5, 0, 0, 20)
@@ -1234,16 +1460,18 @@ local function CreateInterface()
         end
         
         -- ==================== CREATE DROPDOWN (FIXED) ====================
+        local openDropdown = nil
         local function CreateDropdown(parent, text, options, default, callback, saveKey)
             local frame = Instance.new("Frame")
             frame.Size = UDim2.new(1, 0, 0, 45)
             frame.BackgroundColor3 = Colors.ElementBg
             frame.BorderSizePixel = 0
-            frame.ClipsDescendants = true
+            frame.ClipsDescendants = false
+            frame.ZIndex = 2
             frame.Parent = parent
-            
             CreateCorner(frame, UDim.new(0, 6))
-            
+            CreateInfoButton(frame, HelpDescriptions[text], -160)
+
             local label = Instance.new("TextLabel")
             label.Size = UDim2.new(0.5, 0, 0, 45)
             label.Position = UDim2.new(0, 12, 0, 0)
@@ -1253,157 +1481,215 @@ local function CreateInterface()
             label.TextSize = 13
             label.Font = Enum.Font.GothamSemibold
             label.TextXAlignment = Enum.TextXAlignment.Left
+            label.ZIndex = 3
             label.Parent = frame
-            
+
             local selectBtn = Instance.new("TextButton")
+            local isPlayerSelector = text == "Selecionar jogador específico"
             selectBtn.Size = UDim2.new(0, 120, 0, 28)
-            selectBtn.Position = UDim2.new(1, -132, 0.5, -14)
+            selectBtn.Position = UDim2.new(1, isPlayerSelector and -166 or -132, 0.5, -14)
             selectBtn.BackgroundColor3 = Colors.Background
             selectBtn.BorderSizePixel = 0
-            selectBtn.Text = default
+            selectBtn.Text = tostring(default)
             selectBtn.TextColor3 = Colors.Text
             selectBtn.TextSize = 11
             selectBtn.Font = Enum.Font.GothamSemibold
+            selectBtn.ZIndex = 4
             selectBtn.Parent = frame
-            
             CreateCorner(selectBtn, UDim.new(0, 4))
-            
-            local isOpen = false
-            local optionsFrame = Instance.new("Frame")
-            optionsFrame.Size = UDim2.new(1, 0, 0, #options * 32)
-            optionsFrame.Position = UDim2.new(0, 0, 0, 45)
-            optionsFrame.BackgroundTransparency = 1
+
+            -- Lista flutuante fora do ScrollingFrame: não aumenta a linha nem fica cortada.
+            local optionsFrame = Instance.new("ScrollingFrame")
+            optionsFrame.Name = "DropdownPopup"
+            optionsFrame.Size = UDim2.new(0, 180, 0, math.min(#options * 32, 192))
+            optionsFrame.BackgroundColor3 = Colors.Sidebar
+            optionsFrame.BorderSizePixel = 0
+            optionsFrame.ScrollBarThickness = 4
+            optionsFrame.CanvasSize = UDim2.new(0, 0, 0, #options * 32)
             optionsFrame.Visible = false
-            optionsFrame.Parent = frame
-            
-            for i, option in ipairs(options) do
-                local optBtn = Instance.new("TextButton")
-                optBtn.Size = UDim2.new(1, -24, 0, 28)
-                optBtn.Position = UDim2.new(0, 12, 0, (i-1) * 32 + 4)
-                optBtn.BackgroundColor3 = Colors.Background
-                optBtn.BorderSizePixel = 0
-                optBtn.Text = option
-                optBtn.TextColor3 = option == default and Colors.Accent or Colors.Text
-                optBtn.TextSize = 11
-                optBtn.Font = Enum.Font.GothamSemibold
-                optBtn.Parent = optionsFrame
-                
-                CreateCorner(optBtn, UDim.new(0, 4))
-                
-                optBtn.MouseButton1Click:Connect(function()
-                    selectBtn.Text = option
-                    callback(option)
-                    SaveCurrentConfig()
-                    isOpen = false
-                    optionsFrame.Visible = false
-                    frame.Size = UDim2.new(1, 0, 0, 45)
+            optionsFrame.ZIndex = 100
+            optionsFrame.Active = true
+            optionsFrame.Parent = ScreenGui
+            CreateCorner(optionsFrame, UDim.new(0, 6))
+
+            local function ClosePopup()
+                optionsFrame.Visible = false
+                if openDropdown == optionsFrame then openDropdown = nil end
+            end
+            local function RebuildOptions()
+                for _, child in ipairs(optionsFrame:GetChildren()) do
+                    if child:IsA("TextButton") then child:Destroy() end
+                end
+                optionsFrame.Size = UDim2.new(0, 180, 0, math.min(#options * 32, 192))
+                optionsFrame.CanvasSize = UDim2.new(0, 0, 0, #options * 32)
+                for i, option in ipairs(options) do
+                    local optBtn = Instance.new("TextButton")
+                    optBtn.Size = UDim2.new(1, -8, 0, 28)
+                    optBtn.Position = UDim2.new(0, 4, 0, (i-1) * 32 + 2)
+                    optBtn.BackgroundColor3 = Colors.Background
+                    optBtn.BorderSizePixel = 0
+                    optBtn.Text = tostring(option)
+                    optBtn.TextColor3 = option == selectBtn.Text and Colors.Accent or Colors.Text
+                    optBtn.TextSize = 11
+                    optBtn.Font = Enum.Font.GothamSemibold
+                    optBtn.ZIndex = 101
+                    optBtn.Parent = optionsFrame
+                    CreateCorner(optBtn, UDim.new(0, 4))
+                    optBtn.MouseButton1Click:Connect(function()
+                        selectBtn.Text = tostring(option)
+                        callback(option)
+                        if saveKey then SaveCurrentConfig() end
+                        ClosePopup()
+                    end)
+                end
+            end
+            RebuildOptions()
+
+            if isPlayerSelector then
+                local refreshBtn = Instance.new("TextButton")
+                refreshBtn.Size = UDim2.new(0, 28, 0, 28)
+                refreshBtn.Position = UDim2.new(1, -38, 0.5, -14)
+                refreshBtn.BackgroundColor3 = Colors.Accent
+                refreshBtn.BorderSizePixel = 0
+                refreshBtn.Text = "R"
+                refreshBtn.TextColor3 = Colors.Text
+                refreshBtn.TextSize = 13
+                refreshBtn.Font = Enum.Font.GothamBold
+                refreshBtn.ZIndex = 4
+                refreshBtn.Parent = frame
+                CreateCorner(refreshBtn, UDim.new(0, 4))
+                refreshBtn.MouseButton1Click:Connect(function()
+                    local current = selectBtn.Text
+                    table.clear(options)
+                    table.insert(options, "Automático")
+                    for _, player in ipairs(Players:GetPlayers()) do
+                        if player ~= LocalPlayer then table.insert(options, player.Name) end
+                    end
+                    if current ~= "Automático" and not table.find(options, current) then
+                        current = "Automático"
+                        selectBtn.Text = current
+                        callback(current)
+                    end
+                    RebuildOptions()
+                    refreshBtn.Text = "✓"
+                    task.delay(0.7, function()
+                        if refreshBtn and refreshBtn.Parent then refreshBtn.Text = "R" end
+                    end)
                 end)
             end
-            
             selectBtn.MouseButton1Click:Connect(function()
-                isOpen = not isOpen
-                if isOpen then
-                    optionsFrame.Visible = true
-                    frame.Size = UDim2.new(1, 0, 0, 45 + #options * 32)
-                else
-                    frame.Size = UDim2.new(1, 0, 0, 45)
-                    wait(0.1)
-                    optionsFrame.Visible = false
-                end
+                if optionsFrame.Visible then ClosePopup(); return end
+                if openDropdown and openDropdown ~= optionsFrame then openDropdown.Visible = false end
+                local pos = selectBtn.AbsolutePosition
+                local viewport = Camera and Camera.ViewportSize or Vector2.new(800, 600)
+                local popupHeight = optionsFrame.AbsoluteSize.Y
+                local y = pos.Y + selectBtn.AbsoluteSize.Y + 4
+                if y + popupHeight > viewport.Y then y = math.max(4, pos.Y - popupHeight - 4) end
+                optionsFrame.Position = UDim2.fromOffset(math.clamp(pos.X, 4, math.max(4, viewport.X - 184)), y)
+                optionsFrame.Visible = true
+                openDropdown = optionsFrame
             end)
-            
             if saveKey then
-                UIRefs.Dropdowns[saveKey] = {
-                    Set = function(value)
-                        selectBtn.Text = value
-                    end
-                }
+                UIRefs.Dropdowns[saveKey] = { Set = function(value) selectBtn.Text = tostring(value) end }
             end
-            
             return frame
         end
-        
+
         -- ==================== AIM ASSIST TAB ====================
         local aimScroll = TabContents["Aim Assist"]
         
-        CreateToggle(aimScroll, "Enable Aim Assist", AimAssist.Enabled, function(state)
+        CreateToggle(aimScroll, "Ativar auxílio de mira", AimAssist.Enabled, function(state)
             AimAssist.Enabled = state
         end, "AimAssist_Enabled")
         
-        CreateToggle(aimScroll, "Always On", AimAssist.AlwaysOn, function(state)
+        CreateToggle(aimScroll, "Sempre ativado", AimAssist.AlwaysOn, function(state)
             AimAssist.AlwaysOn = state
         end, "AimAssist_AlwaysOn")
         
-        CreateToggle(aimScroll, "Shoot to Activate", AimAssist.ShootToActivate, function(state)
+        CreateToggle(aimScroll, "Ativar ao atirar", AimAssist.ShootToActivate, function(state)
             AimAssist.ShootToActivate = state
         end, "AimAssist_ShootToActivate")
         
-        CreateToggle(aimScroll, "Team Check (Anti-Teamkill)", AimAssist.TeamCheck, function(state)
+        CreateToggle(aimScroll, "Verificar equipe (não mirar em aliados)", AimAssist.TeamCheck, function(state)
             AimAssist.TeamCheck = state
         end, "AimAssist_TeamCheck")
         
-        CreateToggle(aimScroll, "Lock Target", AimAssist.LockTarget, function(state)
+        CreateToggle(aimScroll, "Fixar alvo", AimAssist.LockTarget, function(state)
             AimAssist.LockTarget = state
             if not state then LockedTarget = nil end
         end, "AimAssist_LockTarget")
         
-        CreateToggle(aimScroll, "Magnet Mode", AimAssist.MagnetMode, function(state)
+        CreateToggle(aimScroll, "Modo magnético", AimAssist.MagnetMode, function(state)
             AimAssist.MagnetMode = state
         end, "AimAssist_MagnetMode")
         
-        CreateToggle(aimScroll, "Multi-Part Aim (Head/Body)", AimAssist.MultiPart, function(state)
+        CreateToggle(aimScroll, "Mira em várias partes (cabeça/corpo)", AimAssist.MultiPart, function(state)
             AimAssist.MultiPart = state
         end, "AimAssist_MultiPart")
         
-        CreateDropdown(aimScroll, "Primary Target", {"Head", "Torso", "HumanoidRootPart", "LeftArm", "RightArm", "LeftLeg", "RightLeg"}, AimAssist.TargetPart, function(value)
+        local playerOptions = {"Automático"}
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer then table.insert(playerOptions, player.Name) end
+        end
+        CreateDropdown(aimScroll, "Selecionar jogador específico", playerOptions, "Automático", function(value)
+            AimAssist.SelectedPlayerName = value
+            LockedTarget = nil
+        end)
+
+        CreateDropdown(aimScroll, "Parte principal do alvo", {"Head", "Torso", "HumanoidRootPart", "LeftArm", "RightArm", "LeftLeg", "RightLeg"}, AimAssist.TargetPart, function(value)
             AimAssist.TargetPart = value
         end, "AimAssist_TargetPart")
         
-        CreateDropdown(aimScroll, "Priority Mode", {"FOV", "Distance"}, AimAssist.PriorityMode, function(value)
+        CreateDropdown(aimScroll, "Modo de prioridade", {"FOV", "Distance"}, AimAssist.PriorityMode, function(value)
             AimAssist.PriorityMode = value
         end, "AimAssist_PriorityMode")
         
-        CreateSlider(aimScroll, "FOV Size", 10, 1500, AimAssist.FOV, function(value)
+        CreateToggle(aimScroll, "Priorizar jogador com menor vida", AimAssist.LowestHealthPriority, function(state)
+            AimAssist.LowestHealthPriority = state
+            LockedTarget = nil
+        end, "AimAssist_LowestHealthPriority")
+
+        CreateSlider(aimScroll, "Tamanho do campo de visão", 10, 1500, AimAssist.FOV, function(value)
             AimAssist.FOV = value
             if FOV_Circle then FOV_Circle.Radius = value end
         end, "AimAssist_FOV")
         
-        CreateSlider(aimScroll, "Max Distance", 100, 5000, AimAssist.MaxDistance, function(value)
+        CreateSlider(aimScroll, "Distância máxima", 100, 5000, AimAssist.MaxDistance, function(value)
             AimAssist.MaxDistance = value
         end, "AimAssist_MaxDistance")
         
-        CreateSlider(aimScroll, "Smoothness", 1, 99, math.floor(AimAssist.Smoothness * 100), function(value)
+        CreateSlider(aimScroll, "Suavidade da mira", 1, 99, math.floor(AimAssist.Smoothness * 100), function(value)
             AimAssist.Smoothness = value / 100
         end, "AimAssist_Smoothness")
         
         -- ==================== ESP TAB ====================
         local espScroll = TabContents["ESP"]
         
-        CreateToggle(espScroll, "Enable ESP", ESP.Enabled, function(state)
+        CreateToggle(espScroll, "Ativar ESP", ESP.Enabled, function(state)
             ESP.Enabled = state
         end, "ESP_Enabled")
         
-        CreateToggle(espScroll, "Team Check (Hide Teammates)", ESP.TeamCheck, function(state)
+        CreateToggle(espScroll, "Verificar equipe (ocultar aliados)", ESP.TeamCheck, function(state)
             ESP.TeamCheck = state
         end, "ESP_TeamCheck")
         
-        CreateToggle(espScroll, "Boxes", ESP.Boxes, function(state)
+        CreateToggle(espScroll, "Caixas", ESP.Boxes, function(state)
             ESP.Boxes = state
         end, "ESP_Boxes")
         
-        CreateToggle(espScroll, "Names", ESP.Names, function(state)
+        CreateToggle(espScroll, "Nomes", ESP.Names, function(state)
             ESP.Names = state
         end, "ESP_Names")
         
-        CreateToggle(espScroll, "Tracers", ESP.Tracers, function(state)
+        CreateToggle(espScroll, "Linhas até os jogadores", ESP.Tracers, function(state)
             ESP.Tracers = state
         end, "ESP_Tracers")
         
-        CreateToggle(espScroll, "Health Bar", ESP.HealthBar, function(state)
+        CreateToggle(espScroll, "Barra de vida", ESP.HealthBar, function(state)
             ESP.HealthBar = state
         end, "ESP_HealthBar")
         
-        CreateSlider(espScroll, "Max Distance", 100, 5000, ESP.MaxDistance, function(value)
+        CreateSlider(espScroll, "Distância máxima", 100, 5000, ESP.MaxDistance, function(value)
             ESP.MaxDistance = value
         end, "ESP_MaxDistance")
         
@@ -1411,7 +1697,7 @@ local function CreateInterface()
         local moveScroll = TabContents["Movement"]
         
         -- Master Toggle
-        CreateToggle(moveScroll, "Enable Movement Mods", Movement.Enabled, function(state)
+        CreateToggle(moveScroll, "Ativar modificações de movimento", Movement.Enabled, function(state)
             Movement.Enabled = state
             if state then
                 SetupMovement()
@@ -1432,49 +1718,133 @@ local function CreateInterface()
             end
         end, "Movement_Enabled")
         
-        CreateToggle(moveScroll, "Speed Hack", Movement.SpeedEnabled, function(state)
+        CreateToggle(moveScroll, "Aumentar velocidade", Movement.SpeedEnabled, function(state)
             Movement.SpeedEnabled = state
             Movement.Enabled = true
             SetupMovement()
         end, "Movement_SpeedEnabled")
         
-        CreateSlider(moveScroll, "Speed Value", 16, 200, Movement.SpeedValue, function(value)
+        CreateSlider(moveScroll, "Valor da velocidade", 16, 1000, math.clamp(Movement.SpeedValue, 16, 1000), function(value)
             Movement.SpeedValue = value
             if Movement.SpeedEnabled then
                 SetupMovement()
             end
         end, "Movement_SpeedValue")
         
-        CreateToggle(moveScroll, "Jump Power Hack", Movement.JumpEnabled, function(state)
+        CreateToggle(moveScroll, "Aumentar força do pulo", Movement.JumpEnabled, function(state)
             Movement.JumpEnabled = state
             Movement.Enabled = true
             SetupMovement()
         end, "Movement_JumpEnabled")
         
-        CreateSlider(moveScroll, "Jump Value", 50, 300, Movement.JumpValue, function(value)
+        CreateSlider(moveScroll, "Força do pulo", 50, 1000, math.clamp(Movement.JumpValue, 50, 1000), function(value)
             Movement.JumpValue = value
             if Movement.JumpEnabled then
                 SetupMovement()
             end
         end, "Movement_JumpValue")
         
-        CreateToggle(moveScroll, "Fly (WASD + Space/Shift)", Movement.FlyEnabled, function(state)
+        CreateToggle(moveScroll, "Voar (WASD + Espaço/Shift)", Movement.FlyEnabled, function(state)
             Movement.FlyEnabled = state
             ToggleFly(state)
         end, "Movement_FlyEnabled")
         
-        CreateSlider(moveScroll, "Fly Speed", 10, 500, Movement.FlySpeed, function(value)
+        CreateSlider(moveScroll, "Velocidade de voo", 10, 500, Movement.FlySpeed, function(value)
             Movement.FlySpeed = value
         end, "Movement_FlySpeed")
         
-        CreateToggle(moveScroll, "NoClip", Movement.NoClip, function(state)
+        CreateToggle(moveScroll, "Atravessar objetos (NoClip)", Movement.NoClip, function(state)
             Movement.NoClip = state
         end, "Movement_NoClip")
         
-        CreateToggle(moveScroll, "Infinite Jump", Movement.InfiniteJump, function(state)
+        CreateToggle(moveScroll, "Pulo infinito", Movement.InfiniteJump, function(state)
             Movement.InfiniteJump = state
         end, "Movement_InfiniteJump")
         
+        -- ==================== ATALHOS TAB ====================
+        local shortcutsScroll = TabContents["Atalhos"]
+        local ShortcutBindings = {}
+        local shortcutHint = Instance.new("TextLabel")
+        shortcutHint.Size = UDim2.new(1, 0, 0, 42)
+        shortcutHint.BackgroundTransparency = 1
+        shortcutHint.Text = "Atalhos para todas as opções liga/desliga (Aim Assist, ESP e Movement). Clique em DEFINIR TECLA e pressione uma tecla. Backspace/Delete remove o atalho."
+        shortcutHint.TextColor3 = Colors.Text
+        shortcutHint.TextSize = 11
+        shortcutHint.TextWrapped = true
+        shortcutHint.Font = Enum.Font.Gotham
+        shortcutHint.Parent = shortcutsScroll
+
+        local function AddShortcutRow(key, ref)
+            local row = Instance.new("Frame")
+            row.Size = UDim2.new(1, 0, 0, 42)
+            row.BackgroundColor3 = Colors.ElementBg
+            row.BorderSizePixel = 0
+            row.Parent = shortcutsScroll
+            CreateCorner(row, UDim.new(0, 6))
+            local name = Instance.new("TextLabel")
+            name.Size = UDim2.new(1, -145, 1, 0)
+            name.Position = UDim2.new(0, 10, 0, 0)
+            name.BackgroundTransparency = 1
+            name.Text = ref.Label or key
+            name.TextColor3 = Colors.Text
+            name.TextSize = 12
+            name.Font = Enum.Font.GothamSemibold
+            name.TextXAlignment = Enum.TextXAlignment.Left
+            name.Parent = row
+            local bind = Instance.new("TextButton")
+            bind.Size = UDim2.new(0, 125, 0, 28)
+            bind.Position = UDim2.new(1, -135, 0.5, -14)
+            bind.BackgroundColor3 = Colors.Background
+            bind.BorderSizePixel = 0
+            bind.Text = "DEFINIR TECLA"
+            bind.TextColor3 = Colors.Text
+            bind.TextSize = 10
+            bind.Font = Enum.Font.GothamBold
+            bind.Parent = row
+            CreateCorner(bind, UDim.new(0, 5))
+            ShortcutBindings[key] = { Ref = ref, Button = bind, Key = nil, Waiting = false, Apply = ref.Apply }
+            bind.MouseButton1Click:Connect(function()
+                for _, entry in pairs(ShortcutBindings) do entry.Waiting = false end
+                ShortcutBindings[key].Waiting = true
+                bind.Text = "PRESSIONE..."
+            end)
+        end
+        local shortcutKeys = {}
+        for key in pairs(UIRefs.Toggles) do table.insert(shortcutKeys, key) end
+        table.sort(shortcutKeys)
+        for _, key in ipairs(shortcutKeys) do
+            AddShortcutRow(key, UIRefs.Toggles[key])
+        end
+
+        UserInputService.InputBegan:Connect(function(input, gameProcessed)
+            if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+            for _, entry in pairs(ShortcutBindings) do
+                if entry.Waiting then
+                    entry.Waiting = false
+                    if input.KeyCode == Enum.KeyCode.Backspace or input.KeyCode == Enum.KeyCode.Delete then
+                        entry.Key = nil
+                        entry.Button.Text = "DEFINIR TECLA"
+                    elseif input.KeyCode == Enum.KeyCode.Escape then
+                        entry.Button.Text = entry.Key and entry.Key.Name or "DEFINIR TECLA"
+                    elseif input.KeyCode ~= Enum.KeyCode.Unknown then
+                        entry.Key = input.KeyCode
+                        entry.Button.Text = input.KeyCode.Name
+                    end
+                    return
+                end
+            end
+            if gameProcessed then return end
+            for _, entry in pairs(ShortcutBindings) do
+                if entry.Key == input.KeyCode then
+                    local newState = not entry.Ref.Get()
+                    entry.Ref.Set(newState)
+                    -- Dispara o callback associado através do registro de callbacks.
+                    if entry.Apply then entry.Apply(newState) end
+                    SaveCurrentConfig()
+                end
+            end
+        end)
+
         -- ==================== SETTINGS TAB ====================
         local settingsScroll = TabContents["Settings"]
         
@@ -1484,7 +1854,7 @@ local function CreateInterface()
         saveBtn.Position = UDim2.new(0, 0, 0, 5)
         saveBtn.BackgroundColor3 = Colors.Accent
         saveBtn.BorderSizePixel = 0
-        saveBtn.Text = "SAVE CONFIG"
+        saveBtn.Text = "SALVAR CONFIGURAÇÃO"
         saveBtn.TextColor3 = Colors.Text
         saveBtn.TextSize = 14
         saveBtn.Font = Enum.Font.GothamBold
@@ -1494,9 +1864,9 @@ local function CreateInterface()
         
         saveBtn.MouseButton1Click:Connect(function()
             SaveCurrentConfig()
-            saveBtn.Text = "SAVED!"
+            saveBtn.Text = "SALVO!"
             wait(1)
-            saveBtn.Text = "SAVE CONFIG"
+            saveBtn.Text = "SALVAR CONFIGURAÇÃO"
         end)
         
         -- Reset Config Button
@@ -1505,7 +1875,7 @@ local function CreateInterface()
         resetBtn.Position = UDim2.new(0, 0, 0, 55)
         resetBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
         resetBtn.BorderSizePixel = 0
-        resetBtn.Text = "RESET TO DEFAULT"
+        resetBtn.Text = "RESTAURAR PADRÃO"
         resetBtn.TextColor3 = Colors.Text
         resetBtn.TextSize = 14
         resetBtn.Font = Enum.Font.GothamBold
@@ -1515,9 +1885,9 @@ local function CreateInterface()
         
         resetBtn.MouseButton1Click:Connect(function()
             SaveSystem:Reset()
-            resetBtn.Text = "RESET! REJOIN TO APPLY"
+            resetBtn.Text = "RESTAURADO! ENTRE NOVAMENTE"
             wait(2)
-            resetBtn.Text = "RESET TO DEFAULT"
+            resetBtn.Text = "RESTAURAR PADRÃO"
         end)
         
         -- Unload Button
@@ -1526,7 +1896,7 @@ local function CreateInterface()
         unloadBtn.Position = UDim2.new(0, 0, 0, 105)
         unloadBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
         unloadBtn.BorderSizePixel = 0
-        unloadBtn.Text = "UNLOAD SCRIPT"
+        unloadBtn.Text = "DESCARREGAR SCRIPT"
         unloadBtn.TextColor3 = Colors.Text
         unloadBtn.TextSize = 14
         unloadBtn.Font = Enum.Font.GothamBold
@@ -1538,7 +1908,7 @@ local function CreateInterface()
             Movement.Enabled = false
             ToggleFly(false)
             ScreenGui:Destroy()
-            getgenv().ESPMokuroRunning = false
+            Env.ESPMokuroRunning = nil
             if Connection then Connection:Disconnect() end
             if FOV_Circle then FOV_Circle:Remove() end
             for _, obj in pairs(ESPObjects) do
@@ -1553,7 +1923,7 @@ local function CreateInterface()
         infoLabel.Size = UDim2.new(1, -20, 0, 200)
         infoLabel.Position = UDim2.new(0, 10, 0, 160)
         infoLabel.BackgroundTransparency = 1
-        infoLabel.Text = "MOKURO HUB v3.0\n\nFeatures:\n- Team Check Fixed\n- Multi-Part Aim (Head/Body)\n- Speed & Jump Hack\n- Fly Mode\n- Config Save System\n\nKeys:\n[Insert] Hide/Show\n[F] Temporary Aim\n[Space] Jump (Infinite Jump)"
+        infoLabel.Text = "MOKURO HUB v3.0\n\nRecursos:\n- Verificação de equipe corrigida\n- Mira em várias partes (cabeça/corpo)\n- Aumento de velocidade e pulo\n- Modo de voo\n- Sistema para salvar configurações\n\nTeclas:\n[Insert] Mostrar/ocultar painel\n[F] Mira temporária\n[Espaço] Pular (pulo infinito)"
         infoLabel.TextColor3 = Colors.TextDark
         infoLabel.TextSize = 11
         infoLabel.Font = Enum.Font.Gotham
@@ -1587,13 +1957,18 @@ local function CreateInterface()
             end
         end)
         
-        -- Insert key to toggle UI
+        -- Insert alterna a visibilidade mesmo quando o jogo marca a tecla como processada.
+        -- A conexão fica ativa enquanto o script estiver carregado, então é possível reabrir o painel.
         UserInputService.InputBegan:Connect(function(input, gameProcessed)
-            if gameProcessed then return end
             if input.KeyCode == Enum.KeyCode.Insert then
-                ScreenGui.Enabled = not ScreenGui.Enabled
+                if ScreenGui and ScreenGui.Parent then
+                    ScreenGui.Enabled = not ScreenGui.Enabled
+                end
+                return
             end
-            
+
+            if gameProcessed then return end
+
             -- Infinite Jump
             if Movement.InfiniteJump and input.KeyCode == Enum.KeyCode.Space then
                 local char = LocalPlayer.Character
@@ -1606,7 +1981,17 @@ local function CreateInterface()
             end
         end)
         
-        print("[Mokuro Hub] Interface created successfully!")
+        UserInputService.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 and openDropdown and openDropdown.Visible then
+                local p, sz = openDropdown.AbsolutePosition, openDropdown.AbsoluteSize
+                local m = UserInputService:GetMouseLocation()
+                if m.X < p.X or m.X > p.X + sz.X or m.Y < p.Y or m.Y > p.Y + sz.Y then
+                    openDropdown.Visible = false
+                    openDropdown = nil
+                end
+            end
+        end)
+        print("[Mokuro Hub] Painel criado com sucesso!")
     end)
     
     if not success then
@@ -1628,6 +2013,8 @@ end)
 
 Connection = RunService.RenderStepped:Connect(function()
     pcall(function()
+        -- Atualiza a referência caso o Roblox recrie a câmera.
+        Camera = Workspace.CurrentCamera or Camera
         ApplyAimAssist()
         UpdateESP()
         UpdateMovement()
@@ -1724,9 +2111,9 @@ end)
 CreateInterface()
 
 print("=== MOKURO HUB v3.0 - LOADED ===")
-print("Features:")
-print("  - Team Check Fixed")
-print("  - Multi-Part Aim")
-print("  - Speed/Jump/Fly/NoClip")
-print("  - CONFIG SAVE SYSTEM")
-print("Keys: [Insert] Hide/Show | [F] Aim | [Space] Jump")
+print("Recursos:")
+print("  - Verificação de equipe corrigida")
+print("  - Mira em várias partes")
+print("  - Velocidade/Pulo/Voo/NoClip")
+print("  - SISTEMA DE SALVAMENTO DE CONFIGURAÇÕES")
+print("Teclas: [Insert] Mostrar/ocultar | [F] Mira | [Espaço] Pular")
