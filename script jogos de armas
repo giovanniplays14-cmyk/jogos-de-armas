@@ -1,5 +1,5 @@
--- MOKURO HUB v4.2 - NUMERIC SKILL KEYS SUPPORT
--- ESP, Aim Assist, Teleport, Movement, Skills No Cooldown, Full Shortcuts
+-- MOKURO HUB v4.3 - PER-SKILL DELAY EDITOR
+-- ESP, Aim Assist, Teleport, Movement, Skills No Cooldown com delay individual
 
 local Env = (getgenv and getgenv()) or _G
 if Env.ESPMokuroRunning then
@@ -37,7 +37,7 @@ print("[Mokuro Hub] Serviços carregados")
 
 -- ==================== SAVE SYSTEM ====================
 local SaveSystem = {
-    ConfigName = "MokuroHub_Config_v42",
+    ConfigName = "MokuroHub_Config_v43",
     DefaultConfig = {
         AimAssist_Enabled = false,
         AimAssist_AlwaysOn = false,
@@ -80,6 +80,7 @@ local SaveSystem = {
         Skills_NoCooldownEnabled = false,
         Skills_CooldownInterval = 0.15,
         Skills_SkillKeys = "Z,X,C,V,F",
+        Skills_PerSkillDelay = 0.05,
     }
 }
 
@@ -170,43 +171,44 @@ local Skills = {
     NoCooldownEnabled = SavedConfig.Skills_NoCooldownEnabled or false,
     CooldownInterval = SavedConfig.Skills_CooldownInterval or 0.15,
     SkillKeysStr = SavedConfig.Skills_SkillKeys or "Z,X,C,V,F",
+    PerSkillDelay = SavedConfig.Skills_PerSkillDelay or 0.05,
     LoopThread = nil,
 }
 
--- ==================== SKILL KEYS PARSER (COM NÚMEROS) ====================
+-- ==================== SKILL KEYS PARSER ====================
 local DigitMap = {
-    ["1"] = Enum.KeyCode.One,
-    ["2"] = Enum.KeyCode.Two,
-    ["3"] = Enum.KeyCode.Three,
-    ["4"] = Enum.KeyCode.Four,
-    ["5"] = Enum.KeyCode.Five,
-    ["6"] = Enum.KeyCode.Six,
-    ["7"] = Enum.KeyCode.Seven,
-    ["8"] = Enum.KeyCode.Eight,
-    ["9"] = Enum.KeyCode.Nine,
+    ["1"] = Enum.KeyCode.One, ["2"] = Enum.KeyCode.Two, ["3"] = Enum.KeyCode.Three,
+    ["4"] = Enum.KeyCode.Four, ["5"] = Enum.KeyCode.Five, ["6"] = Enum.KeyCode.Six,
+    ["7"] = Enum.KeyCode.Seven, ["8"] = Enum.KeyCode.Eight, ["9"] = Enum.KeyCode.Nine,
     ["0"] = Enum.KeyCode.Zero,
 }
 
-local function ParseSkillKeys(str)
-    local keys = {}
+local function ParseSkillKeys(str, globalDelay)
+    local entries = {}
     for token in string.gmatch(str, "[^,%s]+") do
-        local upper = string.upper(token)
-        local keyCode = DigitMap[upper] or Enum.KeyCode[upper]
-        if keyCode then
-            table.insert(keys, keyCode)
+        local keyPart, delayPart = token:match("([^:]+):?([^:]*)")
+        if keyPart and keyPart ~= "" then
+            local upper = string.upper(keyPart)
+            local keyCode = DigitMap[upper] or Enum.KeyCode[upper]
+            if keyCode then
+                local delay = tonumber(delayPart) or globalDelay or 0.05
+                if delay < 0.01 then delay = 0.01 end
+                table.insert(entries, { keyCode = keyCode, delay = delay })
+            end
         end
     end
-    return keys
+    return entries
 end
 
 local function SpamAllSkills()
-    local keys = ParseSkillKeys(Skills.SkillKeysStr)
-    for _, keyCode in ipairs(keys) do
+    local entries = ParseSkillKeys(Skills.SkillKeysStr, Skills.PerSkillDelay)
+    for _, entry in ipairs(entries) do
         pcall(function()
-            VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
-            task.wait(0.005)
-            VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
+            VirtualInputManager:SendKeyEvent(true, entry.keyCode, false, game)
+            task.wait(entry.delay)
+            VirtualInputManager:SendKeyEvent(false, entry.keyCode, false, game)
         end)
+        task.wait(entry.delay)
     end
 end
 
@@ -272,12 +274,7 @@ local Colors = {
     Warning = Color3.fromRGB(255, 200, 0)
 }
 
-local UIRefs = {
-    Toggles = {},
-    Sliders = {},
-    Dropdowns = {},
-    Actions = {}
-}
+local UIRefs = { Toggles = {}, Sliders = {}, Dropdowns = {}, Actions = {} }
 
 local function CreateCorner(parent, radius)
     local corner = Instance.new("UICorner")
@@ -329,6 +326,7 @@ local function SaveCurrentConfig()
         Skills_NoCooldownEnabled = Skills.NoCooldownEnabled,
         Skills_CooldownInterval = Skills.CooldownInterval,
         Skills_SkillKeys = Skills.SkillKeysStr,
+        Skills_PerSkillDelay = Skills.PerSkillDelay,
     }
     SaveSystem:Save(config)
 end
@@ -939,9 +937,9 @@ local function CreateInterface()
             ["Velocidade de voo"] = "Velocidade do voo.",
             ["Atravessar objetos (NoClip)"] = "Atravessa partes.",
             ["Pulo infinito"] = "Pula repetidamente.",
-            ["No Cooldown (spam de skills)"] = "Reenvia as teclas das skills em alta frequência para mascarar o cooldown local.",
-            ["Intervalo do No Cooldown"] = "Tempo entre cada disparo. 0.10–0.20s é o ideal.",
-            ["Teclas das skills"] = "Lista separada por vírgula. Aceita letras e números. Ex: Z,X,1,2,Space."
+            ["No Cooldown (spam de skills)"] = "Reenvia as teclas das skills em alta frequência.",
+            ["Intervalo do No Cooldown"] = "Tempo entre cada ciclo do loop.",
+            ["Teclas das skills"] = "Lista separada por vírgula com tempo opcional."
         }
 
         local function InfoBtn(parent, desc, xo)
@@ -1505,9 +1503,9 @@ local function CreateInterface()
         local sk = TabContents["Skills"]
 
         local skHint = Instance.new("TextLabel")
-        skHint.Size = UDim2.new(1, 0, 0, 60)
+        skHint.Size = UDim2.new(1, 0, 0, 70)
         skHint.BackgroundTransparency = 1
-        skHint.Text = "O No Cooldown reenvia as teclas das skills em alta frequência via VirtualInputManager. Aceita letras e números. Use vírgula para separar: Z,X,C,V,F ou Z,1,2,3,4."
+        skHint.Text = "Cada skill tem seu próprio tempo (delay entre keydown e keyup). Adicione, edite ou remova na lista abaixo. Se o tempo ficar vazio, usa o delay padrão."
         skHint.TextColor3 = Colors.TextDark
         skHint.TextSize = 11
         skHint.TextWrapped = true
@@ -1526,7 +1524,7 @@ local function CreateInterface()
 
         local function RefreshStatus()
             if Skills.NoCooldownEnabled then
-                skStatus.Text = string.format("Status: ativo — %s a cada %.2fs", Skills.SkillKeysStr, Skills.CooldownInterval)
+                skStatus.Text = string.format("Status: ativo — delay padrão %.2fs", Skills.PerSkillDelay)
                 skStatus.TextColor3 = Colors.Success
             else
                 skStatus.Text = "Status: inativo"
@@ -1544,42 +1542,256 @@ local function CreateInterface()
             RefreshStatus()
         end, "Skills_CooldownInterval")
 
-        local keysFrame = Instance.new("Frame")
-        keysFrame.Size = UDim2.new(1, 0, 0, 80)
-        keysFrame.BackgroundColor3 = Colors.ElementBg
-        keysFrame.BorderSizePixel = 0
-        keysFrame.Parent = sk
-        CreateCorner(keysFrame, UDim.new(0, 6))
+        local editorFrame = Instance.new("Frame")
+        editorFrame.Size = UDim2.new(1, 0, 0, 340)
+        editorFrame.BackgroundColor3 = Colors.ElementBg
+        editorFrame.BorderSizePixel = 0
+        editorFrame.Parent = sk
+        CreateCorner(editorFrame, UDim.new(0, 6))
 
-        local keysLabel = Instance.new("TextLabel")
-        keysLabel.Size = UDim2.new(1, -20, 0, 20)
-        keysLabel.Position = UDim2.new(0, 10, 0, 5)
-        keysLabel.BackgroundTransparency = 1
-        keysLabel.Text = "Teclas das skills (letras e/ou números, separados por vírgula)"
-        keysLabel.TextColor3 = Colors.Text
-        keysLabel.TextSize = 12
-        keysLabel.Font = Enum.Font.GothamSemibold
-        keysLabel.TextXAlignment = Enum.TextXAlignment.Left
-        keysLabel.Parent = keysFrame
+        local editorTitle = Instance.new("TextLabel")
+        editorTitle.Size = UDim2.new(1, -20, 0, 22)
+        editorTitle.Position = UDim2.new(0, 10, 0, 6)
+        editorTitle.BackgroundTransparency = 1
+        editorTitle.Text = "Configuração de Skills (tecla + tempo em segundos)"
+        editorTitle.TextColor3 = Colors.Text
+        editorTitle.TextSize = 12
+        editorTitle.Font = Enum.Font.GothamSemibold
+        editorTitle.TextXAlignment = Enum.TextXAlignment.Left
+        editorTitle.Parent = editorFrame
 
-        local keysInput = Instance.new("TextBox")
-        keysInput.Size = UDim2.new(1, -20, 0, 32)
-        keysInput.Position = UDim2.new(0, 10, 0, 30)
-        keysInput.BackgroundColor3 = Colors.Background
-        keysInput.BorderSizePixel = 0
-        keysInput.Text = Skills.SkillKeysStr
-        keysInput.PlaceholderText = "Ex: Z,X,1,2,3,4"
-        keysInput.TextColor3 = Colors.Accent
-        keysInput.TextSize = 13
-        keysInput.Font = Enum.Font.GothamBold
-        keysInput.ClearTextOnFocus = false
-        keysInput.Parent = keysFrame
-        CreateCorner(keysInput, UDim.new(0, 4))
-        keysInput:GetPropertyChangedSignal("Text"):Connect(function()
-            Skills.SkillKeysStr = keysInput.Text
+        local defaultDelayLabel = Instance.new("TextLabel")
+        defaultDelayLabel.Size = UDim2.new(0.5, -20, 0, 18)
+        defaultDelayLabel.Position = UDim2.new(0, 10, 0, 30)
+        defaultDelayLabel.BackgroundTransparency = 1
+        defaultDelayLabel.Text = "Delay padrão (sem ':'):"
+        defaultDelayLabel.TextColor3 = Colors.TextDark
+        defaultDelayLabel.TextSize = 11
+        defaultDelayLabel.Font = Enum.Font.Gotham
+        defaultDelayLabel.TextXAlignment = Enum.TextXAlignment.Left
+        defaultDelayLabel.Parent = editorFrame
+
+        local defaultDelayInput = Instance.new("TextBox")
+        defaultDelayInput.Size = UDim2.new(0, 70, 0, 22)
+        defaultDelayInput.Position = UDim2.new(0.5, -20, 0, 28)
+        defaultDelayInput.BackgroundColor3 = Colors.Background
+        defaultDelayInput.BorderSizePixel = 0
+        defaultDelayInput.Text = string.format("%.2f", Skills.PerSkillDelay)
+        defaultDelayInput.TextColor3 = Colors.Accent
+        defaultDelayInput.TextSize = 12
+        defaultDelayInput.Font = Enum.Font.GothamBold
+        defaultDelayInput.ClearTextOnFocus = false
+        defaultDelayInput.Parent = editorFrame
+        CreateCorner(defaultDelayInput, UDim.new(0, 4))
+
+        local skillsList = Instance.new("ScrollingFrame")
+        skillsList.Size = UDim2.new(1, -20, 0, 230)
+        skillsList.Position = UDim2.new(0, 10, 0, 56)
+        skillsList.BackgroundColor3 = Colors.Background
+        skillsList.BorderSizePixel = 0
+        skillsList.ScrollBarThickness = 4
+        skillsList.ScrollBarImageColor3 = Colors.Accent
+        skillsList.CanvasSize = UDim2.new(0, 0, 0, 0)
+        skillsList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        skillsList.Parent = editorFrame
+        CreateCorner(skillsList, UDim.new(0, 4))
+
+        local listPad = Instance.new("UIPadding")
+        listPad.PaddingTop = UDim.new(0, 6)
+        listPad.PaddingBottom = UDim.new(0, 6)
+        listPad.PaddingLeft = UDim.new(0, 6)
+        listPad.PaddingRight = UDim.new(0, 6)
+        listPad.Parent = skillsList
+
+        local listLayout = Instance.new("UIListLayout")
+        listLayout.Padding = UDim.new(0, 4)
+        listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        listLayout.Parent = skillsList
+
+        local function ParseEditorString(str)
+            local result = {}
+            for token in string.gmatch(str, "[^,%s]+") do
+                local keyPart, delayPart = token:match("([^:]+):?([^:]*)")
+                if keyPart and keyPart ~= "" then
+                    local delay = tonumber(delayPart)
+                    table.insert(result, { key = string.upper(keyPart), delay = delay })
+                end
+            end
+            return result
+        end
+
+        local function BuildEditorString(entries)
+            local parts = {}
+            for _, e in ipairs(entries) do
+                if e.delay then
+                    table.insert(parts, e.key .. ":" .. string.format("%.2f", e.delay))
+                else
+                    table.insert(parts, e.key)
+                end
+            end
+            return table.concat(parts, ",")
+        end
+
+        local RebuildEditor
+
+        RebuildEditor = function()
+            for _, ch in ipairs(skillsList:GetChildren()) do
+                if ch:IsA("Frame") then ch:Destroy() end
+            end
+            local entries = ParseEditorString(Skills.SkillKeysStr)
+            for i, entry in ipairs(entries) do
+                local row = Instance.new("Frame")
+                row.Size = UDim2.new(1, 0, 0, 34)
+                row.BackgroundColor3 = Colors.ElementBg
+                row.BorderSizePixel = 0
+                row.Parent = skillsList
+                CreateCorner(row, UDim.new(0, 4))
+
+                local keyLabel = Instance.new("TextLabel")
+                keyLabel.Size = UDim2.new(0, 60, 1, 0)
+                keyLabel.Position = UDim2.new(0, 8, 0, 0)
+                keyLabel.BackgroundTransparency = 1
+                keyLabel.Text = entry.key
+                keyLabel.TextColor3 = Colors.Text
+                keyLabel.TextSize = 13
+                keyLabel.Font = Enum.Font.GothamBold
+                keyLabel.TextXAlignment = Enum.TextXAlignment.Left
+                keyLabel.Parent = row
+
+                local delayLabel2 = Instance.new("TextLabel")
+                delayLabel2.Size = UDim2.new(0, 80, 1, 0)
+                delayLabel2.Position = UDim2.new(0, 70, 0, 0)
+                delayLabel2.BackgroundTransparency = 1
+                delayLabel2.Text = "tempo (s):"
+                delayLabel2.TextColor3 = Colors.TextDark
+                delayLabel2.TextSize = 11
+                delayLabel2.Font = Enum.Font.Gotham
+                delayLabel2.TextXAlignment = Enum.TextXAlignment.Left
+                delayLabel2.Parent = row
+
+                local delayInput = Instance.new("TextBox")
+                delayInput.Size = UDim2.new(0, 70, 0, 26)
+                delayInput.Position = UDim2.new(0, 150, 0.5, -13)
+                delayInput.BackgroundColor3 = Colors.Background
+                delayInput.BorderSizePixel = 0
+                delayInput.Text = entry.delay and string.format("%.2f", entry.delay) or ""
+                delayInput.PlaceholderText = "padrão"
+                delayInput.TextColor3 = Colors.Accent
+                delayInput.TextSize = 12
+                delayInput.Font = Enum.Font.GothamBold
+                delayInput.ClearTextOnFocus = false
+                delayInput.Parent = row
+                CreateCorner(delayInput, UDim.new(0, 4))
+                delayInput.FocusLost:Connect(function()
+                    local v = tonumber(delayInput.Text)
+                    if v and v >= 0.01 then
+                        entry.delay = v
+                        delayInput.Text = string.format("%.2f", v)
+                    else
+                        entry.delay = nil
+                        delayInput.Text = ""
+                    end
+                    Skills.SkillKeysStr = BuildEditorString(entries)
+                    RefreshStatus()
+                    SaveCurrentConfig()
+                end)
+
+                local removeBtn = Instance.new("TextButton")
+                removeBtn.Size = UDim2.new(0, 28, 0, 26)
+                removeBtn.Position = UDim2.new(1, -36, 0.5, -13)
+                removeBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
+                removeBtn.BorderSizePixel = 0
+                removeBtn.Text = "X"
+                removeBtn.TextColor3 = Colors.Text
+                removeBtn.TextSize = 13
+                removeBtn.Font = Enum.Font.GothamBold
+                removeBtn.Parent = row
+                CreateCorner(removeBtn, UDim.new(0, 4))
+                removeBtn.MouseButton1Click:Connect(function()
+                    table.remove(entries, i)
+                    Skills.SkillKeysStr = BuildEditorString(entries)
+                    RebuildEditor()
+                    RefreshStatus()
+                    SaveCurrentConfig()
+                end)
+            end
+        end
+
+        local addFrame = Instance.new("Frame")
+        addFrame.Size = UDim2.new(1, 0, 0, 38)
+        addFrame.Position = UDim2.new(0, 10, 0, 296)
+        addFrame.BackgroundColor3 = Colors.Background
+        addFrame.BorderSizePixel = 0
+        addFrame.Parent = editorFrame
+        CreateCorner(addFrame, UDim.new(0, 4))
+
+        local addKeyInput = Instance.new("TextBox")
+        addKeyInput.Size = UDim2.new(0, 60, 0, 26)
+        addKeyInput.Position = UDim2.new(0, 6, 0.5, -13)
+        addKeyInput.BackgroundColor3 = Colors.ElementBg
+        addKeyInput.BorderSizePixel = 0
+        addKeyInput.Text = ""
+        addKeyInput.PlaceholderText = "Z"
+        addKeyInput.TextColor3 = Colors.Text
+        addKeyInput.TextSize = 13
+        addKeyInput.Font = Enum.Font.GothamBold
+        addKeyInput.ClearTextOnFocus = false
+        addKeyInput.Parent = addFrame
+        CreateCorner(addKeyInput, UDim.new(0, 4))
+
+        local addDelayInput = Instance.new("TextBox")
+        addDelayInput.Size = UDim2.new(0, 70, 0, 26)
+        addDelayInput.Position = UDim2.new(0, 74, 0.5, -13)
+        addDelayInput.BackgroundColor3 = Colors.ElementBg
+        addDelayInput.BorderSizePixel = 0
+        addDelayInput.Text = ""
+        addDelayInput.PlaceholderText = "tempo"
+        addDelayInput.TextColor3 = Colors.Accent
+        addDelayInput.TextSize = 12
+        addDelayInput.Font = Enum.Font.GothamBold
+        addDelayInput.ClearTextOnFocus = false
+        addDelayInput.Parent = addFrame
+        CreateCorner(addDelayInput, UDim.new(0, 4))
+
+        local addBtn = Instance.new("TextButton")
+        addBtn.Size = UDim2.new(0, 70, 0, 26)
+        addBtn.Position = UDim2.new(0, 150, 0.5, -13)
+        addBtn.BackgroundColor3 = Colors.Success
+        addBtn.BorderSizePixel = 0
+        addBtn.Text = "+ ADD"
+        addBtn.TextColor3 = Colors.Text
+        addBtn.TextSize = 12
+        addBtn.Font = Enum.Font.GothamBold
+        addBtn.Parent = addFrame
+        CreateCorner(addBtn, UDim.new(0, 4))
+        addBtn.MouseButton1Click:Connect(function()
+            local keyPart = string.upper(string.gsub(addKeyInput.Text, "%s", ""))
+            if keyPart == "" then return end
+            local delay = tonumber(addDelayInput.Text)
+            if delay and delay < 0.01 then delay = nil end
+            local entries = ParseEditorString(Skills.SkillKeysStr)
+            table.insert(entries, { key = keyPart, delay = delay })
+            Skills.SkillKeysStr = BuildEditorString(entries)
+            addKeyInput.Text = ""
+            addDelayInput.Text = ""
+            RebuildEditor()
             RefreshStatus()
             SaveCurrentConfig()
         end)
+
+        defaultDelayInput.FocusLost:Connect(function()
+            local v = tonumber(defaultDelayInput.Text)
+            if v and v >= 0.01 then
+                Skills.PerSkillDelay = v
+                defaultDelayInput.Text = string.format("%.2f", v)
+                RefreshStatus()
+                SaveCurrentConfig()
+            else
+                defaultDelayInput.Text = string.format("%.2f", Skills.PerSkillDelay)
+            end
+        end)
+
+        RebuildEditor()
 
         local resetNow = Instance.new("TextButton")
         resetNow.Size = UDim2.new(1, 0, 0, 40)
@@ -1593,7 +1805,7 @@ local function CreateInterface()
         CreateCorner(resetNow, UDim.new(0, 6))
         resetNow.MouseButton1Click:Connect(function()
             pcall(SpamAllSkills)
-            skStatus.Text = "Skills disparadas: " .. Skills.SkillKeysStr
+            skStatus.Text = "Skills disparadas com delays individuais"
             skStatus.TextColor3 = Colors.Warning
             task.delay(1.5, RefreshStatus)
         end)
@@ -1758,7 +1970,6 @@ local function CreateInterface()
             end
         end)
 
-        -- DRAGGING
         local dragging = false
         local dragStart = nil
         local startPos = nil
@@ -1881,5 +2092,5 @@ if Skills.NoCooldownEnabled then
     StartNoCooldownLoop()
 end
 
-print("=== MOKURO HUB v4.2 - LOADED ===")
-print("NC com suporte a números. Teclas: " .. Skills.SkillKeysStr)
+print("=== MOKURO HUB v4.3 - LOADED ===")
+print("Editor de skill com tempo individual ativo")
