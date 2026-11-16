@@ -1,5 +1,5 @@
--- MOKURO HUB v4.3 - PER-SKILL DELAY EDITOR
--- ESP, Aim Assist, Teleport, Movement, Skills No Cooldown com delay individual
+-- MOKURO HUB v4.5 - SHORTCUT RESET + CLEAR BUTTONS
+-- ESP, Aim Assist, Teleport, Movement, Skills NC com delay individual, Atalhos com reset
 
 local Env = (getgenv and getgenv()) or _G
 if Env.ESPMokuroRunning then
@@ -37,7 +37,7 @@ print("[Mokuro Hub] Serviços carregados")
 
 -- ==================== SAVE SYSTEM ====================
 local SaveSystem = {
-    ConfigName = "MokuroHub_Config_v43",
+    ConfigName = "MokuroHub_Config_v45",
     DefaultConfig = {
         AimAssist_Enabled = false,
         AimAssist_AlwaysOn = false,
@@ -168,11 +168,12 @@ local Movement = {
 }
 
 local Skills = {
-    NoCooldownEnabled = SavedConfig.Skills_NoCooldownEnabled or false,
+    NoCooldownEnabled = false,
     CooldownInterval = SavedConfig.Skills_CooldownInterval or 0.15,
     SkillKeysStr = SavedConfig.Skills_SkillKeys or "Z,X,C,V,F",
     PerSkillDelay = SavedConfig.Skills_PerSkillDelay or 0.05,
     LoopThread = nil,
+    LoopRunning = false,
 }
 
 -- ==================== SKILL KEYS PARSER ====================
@@ -201,8 +202,11 @@ local function ParseSkillKeys(str, globalDelay)
 end
 
 local function SpamAllSkills()
+    if not Skills.NoCooldownEnabled then return end
+    if not Skills.LoopRunning then return end
     local entries = ParseSkillKeys(Skills.SkillKeysStr, Skills.PerSkillDelay)
     for _, entry in ipairs(entries) do
+        if not Skills.NoCooldownEnabled then return end
         pcall(function()
             VirtualInputManager:SendKeyEvent(true, entry.keyCode, false, game)
             task.wait(entry.delay)
@@ -217,20 +221,28 @@ local function StartNoCooldownLoop()
         pcall(function() task.cancel(Skills.LoopThread) end)
         Skills.LoopThread = nil
     end
+    Skills.LoopRunning = true
     Skills.LoopThread = task.spawn(function()
-        while Skills.NoCooldownEnabled do
+        while Skills.NoCooldownEnabled and Skills.LoopRunning do
             pcall(SpamAllSkills)
             task.wait(math.max(0.05, Skills.CooldownInterval))
         end
+        Skills.LoopRunning = false
         Skills.LoopThread = nil
     end)
 end
 
 local function StopNoCooldownLoop()
     Skills.NoCooldownEnabled = false
+    Skills.LoopRunning = false
     if Skills.LoopThread then
         pcall(function() task.cancel(Skills.LoopThread) end)
         Skills.LoopThread = nil
+    end
+    for _, kc in pairs(DigitMap) do pcall(function() VirtualInputManager:SendKeyEvent(false, kc, false, game) end) end
+    for _, name in ipairs({"Z","X","C","V","F","Q","E","R","T","G","B","H","Y","U","I","O","P"}) do
+        local kc = Enum.KeyCode[name]
+        if kc then pcall(function() VirtualInputManager:SendKeyEvent(false, kc, false, game) end) end
     end
 end
 
@@ -260,6 +272,7 @@ local LastPartSwitch = tick()
 local FlyConnection = nil
 local OriginalWalkSpeed = 16
 local OriginalJumpPower = 50
+local ShortcutBindings = {}
 
 local Colors = {
     Background = Color3.fromRGB(15, 15, 15),
@@ -281,6 +294,14 @@ local function CreateCorner(parent, radius)
     corner.CornerRadius = radius or UDim.new(0, 6)
     corner.Parent = parent
     return corner
+end
+
+local function IsKeySkillKey(keyCode)
+    local entries = ParseSkillKeys(Skills.SkillKeysStr, Skills.PerSkillDelay)
+    for _, e in ipairs(entries) do
+        if e.keyCode == keyCode then return true end
+    end
+    return false
 end
 
 local function SaveCurrentConfig()
@@ -1505,7 +1526,7 @@ local function CreateInterface()
         local skHint = Instance.new("TextLabel")
         skHint.Size = UDim2.new(1, 0, 0, 70)
         skHint.BackgroundTransparency = 1
-        skHint.Text = "Cada skill tem seu próprio tempo (delay entre keydown e keyup). Adicione, edite ou remova na lista abaixo. Se o tempo ficar vazio, usa o delay padrão."
+        skHint.Text = "Cada skill tem seu próprio tempo (delay entre keydown e keyup). Adicione, edite ou remova na lista abaixo. Se o tempo ficar vazio, usa o delay padrão. O NC só dispara quando o toggle está LIGADO."
         skHint.TextColor3 = Colors.TextDark
         skHint.TextSize = 11
         skHint.TextWrapped = true
@@ -1804,7 +1825,27 @@ local function CreateInterface()
         resetNow.Parent = sk
         CreateCorner(resetNow, UDim.new(0, 6))
         resetNow.MouseButton1Click:Connect(function()
-            pcall(SpamAllSkills)
+            if #ParseSkillKeys(Skills.SkillKeysStr, Skills.PerSkillDelay) == 0 then
+                skStatus.Text = "Nenhuma skill configurada"
+                skStatus.TextColor3 = Colors.Warning
+                task.delay(1.5, RefreshStatus)
+                return
+            end
+            local wasEnabled = Skills.NoCooldownEnabled
+            local wasRunning = Skills.LoopRunning
+            Skills.LoopRunning = true
+            Skills.NoCooldownEnabled = true
+            local entries = ParseSkillKeys(Skills.SkillKeysStr, Skills.PerSkillDelay)
+            for _, entry in ipairs(entries) do
+                pcall(function()
+                    VirtualInputManager:SendKeyEvent(true, entry.keyCode, false, game)
+                    task.wait(entry.delay)
+                    VirtualInputManager:SendKeyEvent(false, entry.keyCode, false, game)
+                end)
+                task.wait(entry.delay)
+            end
+            Skills.NoCooldownEnabled = wasEnabled
+            Skills.LoopRunning = wasRunning
             skStatus.Text = "Skills disparadas com delays individuais"
             skStatus.TextColor3 = Colors.Warning
             task.delay(1.5, RefreshStatus)
@@ -1815,23 +1856,72 @@ local function CreateInterface()
             Type = "action",
             Set = function() return nil end,
             Get = function() return false end,
-            Apply = function() pcall(SpamAllSkills) end
+            Apply = function()
+                local entries = ParseSkillKeys(Skills.SkillKeysStr, Skills.PerSkillDelay)
+                for _, entry in ipairs(entries) do
+                    pcall(function()
+                        VirtualInputManager:SendKeyEvent(true, entry.keyCode, false, game)
+                        task.wait(entry.delay)
+                        VirtualInputManager:SendKeyEvent(false, entry.keyCode, false, game)
+                    end)
+                    task.wait(entry.delay)
+                end
+            end
         }
 
         RefreshStatus()
 
         -- ATALHOS TAB
         local at = TabContents["Atalhos"]
-        local Bindings = {}
         local hint = Instance.new("TextLabel")
         hint.Size = UDim2.new(1, 0, 0, 50)
         hint.BackgroundTransparency = 1
-        hint.Text = "Clique em DEFINIR TECLA e pressione uma tecla. Backspace/Delete remove. Opções de ciclo alternam entre valores."
+        hint.Text = "Clique em DEFINIR TECLA e pressione uma tecla. Teclas usadas pelo NC de Skills são bloqueadas aqui para evitar conflito."
         hint.TextColor3 = Colors.Text
         hint.TextSize = 11
         hint.TextWrapped = true
         hint.Font = Enum.Font.Gotham
         hint.Parent = at
+
+        local shortcutStatus = Instance.new("TextLabel")
+        shortcutStatus.Size = UDim2.new(1, 0, 0, 22)
+        shortcutStatus.BackgroundTransparency = 1
+        shortcutStatus.Text = ""
+        shortcutStatus.TextColor3 = Colors.Warning
+        shortcutStatus.TextSize = 11
+        shortcutStatus.Font = Enum.Font.GothamSemibold
+        shortcutStatus.TextXAlignment = Enum.TextXAlignment.Left
+        shortcutStatus.Parent = at
+
+        local resetShortcutsBtn = Instance.new("TextButton")
+        resetShortcutsBtn.Size = UDim2.new(1, 0, 0, 38)
+        resetShortcutsBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
+        resetShortcutsBtn.BorderSizePixel = 0
+        resetShortcutsBtn.Text = "REDEFINIR TODOS OS ATALHOS"
+        resetShortcutsBtn.TextColor3 = Colors.Text
+        resetShortcutsBtn.TextSize = 12
+        resetShortcutsBtn.Font = Enum.Font.GothamBold
+        resetShortcutsBtn.Parent = at
+        CreateCorner(resetShortcutsBtn, UDim.new(0, 6))
+
+        local function ClearAllBindings()
+            for _, entry in pairs(ShortcutBindings) do
+                entry.Key = nil
+                entry.Waiting = false
+                entry.Button.Text = "DEFINIR TECLA"
+            end
+            shortcutStatus.Text = "Todos os atalhos foram removidos"
+            shortcutStatus.TextColor3 = Colors.Success
+            task.delay(2, function()
+                if shortcutStatus and shortcutStatus.Parent then
+                    shortcutStatus.Text = ""
+                end
+            end)
+        end
+
+        resetShortcutsBtn.MouseButton1Click:Connect(function()
+            ClearAllBindings()
+        end)
 
         local function AddRow(key, ref)
             local r = Instance.new("Frame")
@@ -1841,7 +1931,7 @@ local function CreateInterface()
             r.Parent = at
             CreateCorner(r, UDim.new(0, 6))
             local n = Instance.new("TextLabel")
-            n.Size = UDim2.new(1, -145, 1, 0)
+            n.Size = UDim2.new(1, -220, 1, 0)
             n.Position = UDim2.new(0, 10, 0, 0)
             n.BackgroundTransparency = 1
             n.Text = ref.Label or key
@@ -1850,6 +1940,19 @@ local function CreateInterface()
             n.Font = Enum.Font.GothamSemibold
             n.TextXAlignment = Enum.TextXAlignment.Left
             n.Parent = r
+
+            local clearBtn = Instance.new("TextButton")
+            clearBtn.Size = UDim2.new(0, 60, 0, 28)
+            clearBtn.Position = UDim2.new(1, -205, 0.5, -14)
+            clearBtn.BackgroundColor3 = Color3.fromRGB(120, 40, 40)
+            clearBtn.BorderSizePixel = 0
+            clearBtn.Text = "LIMPAR"
+            clearBtn.TextColor3 = Colors.Text
+            clearBtn.TextSize = 10
+            clearBtn.Font = Enum.Font.GothamBold
+            clearBtn.Parent = r
+            CreateCorner(clearBtn, UDim.new(0, 5))
+
             local b = Instance.new("TextButton")
             b.Size = UDim2.new(0, 125, 0, 28)
             b.Position = UDim2.new(1, -135, 0.5, -14)
@@ -1861,11 +1964,40 @@ local function CreateInterface()
             b.Font = Enum.Font.GothamBold
             b.Parent = r
             CreateCorner(b, UDim.new(0, 5))
-            Bindings[key] = { Ref = ref, Button = b, Key = nil, Waiting = false, Apply = ref.Apply, Get = ref.Get, Set = ref.Set, Type = ref.Type or "toggle" }
+
+            ShortcutBindings[key] = {
+                Ref = ref,
+                Button = b,
+                ClearButton = clearBtn,
+                Key = nil,
+                Waiting = false,
+                Apply = ref.Apply,
+                Get = ref.Get,
+                Set = ref.Set,
+                Type = ref.Type or "toggle"
+            }
+
             b.MouseButton1Click:Connect(function()
-                for _, e in pairs(Bindings) do e.Waiting = false end
-                Bindings[key].Waiting = true
+                for _, e in pairs(ShortcutBindings) do e.Waiting = false end
+                ShortcutBindings[key].Waiting = true
                 b.Text = "PRESSIONE..."
+                shortcutStatus.Text = ""
+            end)
+
+            clearBtn.MouseButton1Click:Connect(function()
+                local e = ShortcutBindings[key]
+                if e then
+                    e.Key = nil
+                    e.Waiting = false
+                    e.Button.Text = "DEFINIR TECLA"
+                    shortcutStatus.Text = "Atalho removido: " .. (ref.Label or key)
+                    shortcutStatus.TextColor3 = Colors.Success
+                    task.delay(2, function()
+                        if shortcutStatus and shortcutStatus.Parent then
+                            shortcutStatus.Text = ""
+                        end
+                    end)
+                end
             end)
         end
 
@@ -1880,21 +2012,33 @@ local function CreateInterface()
 
         UserInputService.InputBegan:Connect(function(input, gp)
             if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
-            for _, e in pairs(Bindings) do
+            for key, e in pairs(ShortcutBindings) do
                 if e.Waiting then
                     e.Waiting = false
                     if input.KeyCode == Enum.KeyCode.Backspace or input.KeyCode == Enum.KeyCode.Delete then
-                        e.Key = nil; e.Button.Text = "DEFINIR TECLA"
+                        e.Key = nil
+                        e.Button.Text = "DEFINIR TECLA"
+                        shortcutStatus.Text = ""
                     elseif input.KeyCode == Enum.KeyCode.Escape then
                         e.Button.Text = e.Key and e.Key.Name or "DEFINIR TECLA"
+                        shortcutStatus.Text = ""
                     elseif input.KeyCode ~= Enum.KeyCode.Unknown then
-                        e.Key = input.KeyCode; e.Button.Text = input.KeyCode.Name
+                        if IsKeySkillKey(input.KeyCode) then
+                            e.Button.Text = e.Key and e.Key.Name or "DEFINIR TECLA"
+                            shortcutStatus.Text = "Tecla bloqueada: já é usada pelo NC de Skills"
+                            shortcutStatus.TextColor3 = Colors.Warning
+                        else
+                            e.Key = input.KeyCode
+                            e.Button.Text = input.KeyCode.Name
+                            shortcutStatus.Text = ""
+                        end
                     end
                     return
                 end
             end
             if gp then return end
-            for _, e in pairs(Bindings) do
+            if IsKeySkillKey(input.KeyCode) then return end
+            for _, e in pairs(ShortcutBindings) do
                 if e.Key == input.KeyCode then
                     if e.Type == "cycle" then
                         local nv = e.Set and e.Set()
@@ -2088,9 +2232,6 @@ end)
 
 CreateInterface()
 
-if Skills.NoCooldownEnabled then
-    StartNoCooldownLoop()
-end
-
-print("=== MOKURO HUB v4.3 - LOADED ===")
-print("Editor de skill com tempo individual ativo")
+print("=== MOKURO HUB v4.5 - LOADED ===")
+print("Botão 'REDEFINIR TODOS OS ATALHOS' na aba Atalhos")
+print("Botão 'LIMPAR' em cada linha de atalho")
