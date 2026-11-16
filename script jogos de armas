@@ -1,5 +1,5 @@
--- MOKURO HUB v4.5 - SHORTCUT RESET + CLEAR BUTTONS
--- ESP, Aim Assist, Teleport, Movement, Skills NC com delay individual, Atalhos com reset
+-- MOKURO HUB v4.6 - PERFORMANCE TAB (ANTI-LAG + FAST INPUT)
+-- ESP, Aim Assist, Teleport, Movement, Skills NC, Atalhos, Performance
 
 local Env = (getgenv and getgenv()) or _G
 if Env.ESPMokuroRunning then
@@ -16,6 +16,7 @@ local TweenService = game:GetService("TweenService")
 local HttpService = game:GetService("HttpService")
 local GuiService = game:GetService("GuiService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
+local Lighting = game:GetService("Lighting")
 
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
@@ -37,7 +38,7 @@ print("[Mokuro Hub] Serviços carregados")
 
 -- ==================== SAVE SYSTEM ====================
 local SaveSystem = {
-    ConfigName = "MokuroHub_Config_v45",
+    ConfigName = "MokuroHub_Config_v46",
     DefaultConfig = {
         AimAssist_Enabled = false,
         AimAssist_AlwaysOn = false,
@@ -81,6 +82,8 @@ local SaveSystem = {
         Skills_CooldownInterval = 0.15,
         Skills_SkillKeys = "Z,X,C,V,F",
         Skills_PerSkillDelay = 0.05,
+        Performance_AntiLagEnabled = false,
+        Performance_FastInputEnabled = false,
     }
 }
 
@@ -174,6 +177,14 @@ local Skills = {
     PerSkillDelay = SavedConfig.Skills_PerSkillDelay or 0.05,
     LoopThread = nil,
     LoopRunning = false,
+}
+
+local Performance = {
+    AntiLagEnabled = SavedConfig.Performance_AntiLagEnabled or false,
+    FastInputEnabled = SavedConfig.Performance_FastInputEnabled or false,
+    InputConnections = {},
+    FrameSkipCounter = 0,
+    OriginalQuality = Enum.QualityLevel.Level08,
 }
 
 -- ==================== SKILL KEYS PARSER ====================
@@ -348,8 +359,113 @@ local function SaveCurrentConfig()
         Skills_CooldownInterval = Skills.CooldownInterval,
         Skills_SkillKeys = Skills.SkillKeysStr,
         Skills_PerSkillDelay = Skills.PerSkillDelay,
+        Performance_AntiLagEnabled = Performance.AntiLagEnabled,
+        Performance_FastInputEnabled = Performance.FastInputEnabled,
     }
     SaveSystem:Save(config)
+end
+
+-- ==================== ANTI-LAG SYSTEM ====================
+local function CleanupInputConnections()
+    for _, conn in ipairs(Performance.InputConnections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    Performance.InputConnections = {}
+end
+
+local function RegisterInputConnection(conn)
+    table.insert(Performance.InputConnections, conn)
+    return conn
+end
+
+local function ApplyAntiLag()
+    pcall(function()
+        Performance.OriginalQuality = settings().Rendering.QualityLevel
+    end)
+    pcall(function()
+        Lighting.GlobalShadows = false
+        Lighting.FogEnd = 100000
+        for _, effect in ipairs(Lighting:GetChildren()) do
+            if effect:IsA("BlurEffect") or effect:IsA("SunRaysEffect") or effect:IsA("ColorCorrectionEffect") then
+                effect.Enabled = false
+            end
+        end
+    end)
+    pcall(function()
+        settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+    end)
+    pcall(function()
+        for _, obj in ipairs(Workspace:GetDescendants()) do
+            if obj:IsA("ParticleEmitter") then obj.Enabled = false
+            elseif obj:IsA("Trail") then obj.Enabled = false
+            elseif obj:IsA("Smoke") then obj.Enabled = false
+            elseif obj:IsA("Fire") then obj.Enabled = false
+            elseif obj:IsA("Sparkles") then obj.Enabled = false
+            end
+        end
+    end)
+    pcall(function()
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character then
+                local char = player.Character
+                local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                local theirRoot = char:FindFirstChild("HumanoidRootPart")
+                if myRoot and theirRoot then
+                    local dist = (myRoot.Position - theirRoot.Position).Magnitude
+                    if dist > 500 then
+                        for _, part in pairs(char:GetDescendants()) do
+                            if part:IsA("BasePart") and part.Material ~= Enum.Material.SmoothPlastic then
+                                part.Material = Enum.Material.SmoothPlastic
+                            end
+                            if part:IsA("Decal") then part.Transparency = 1 end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
+
+local function RestoreGraphics()
+    pcall(function()
+        Lighting.GlobalShadows = true
+        Lighting.FogEnd = 100000
+    end)
+    pcall(function()
+        settings().Rendering.QualityLevel = Performance.OriginalQuality
+    end)
+end
+
+local function ApplyInputPriority()
+    pcall(function()
+        UserInputService.MouseDeltaSensitivity = 1
+        UserInputService.TouchCameraSensitivity = 1
+    end)
+    pcall(function()
+        if UserInputService.GamepadEnabled then
+            UserInputService.GamepadEnabled = false
+        end
+    end)
+    pcall(function()
+        if UserInputService.TouchEnabled then
+            UserInputService.TouchEnabled = false
+        end
+    end)
+end
+
+local function RestoreInput()
+    pcall(function()
+        UserInputService.MouseDeltaSensitivity = 1
+        UserInputService.TouchCameraSensitivity = 1
+    end)
+end
+
+local function EnableFastInput()
+    CleanupInputConnections()
+end
+
+local function DisableFastInput()
+    CleanupInputConnections()
 end
 
 -- ==================== ESP SYSTEM ====================
@@ -841,6 +957,9 @@ local function CreateInterface()
             Movement.Enabled = false
             ToggleFly(false)
             StopNoCooldownLoop()
+            RestoreGraphics()
+            DisableFastInput()
+            RestoreInput()
             ScreenGui:Destroy()
             Env.ESPMokuroRunning = nil
             if Connection then Connection:Disconnect() end
@@ -864,13 +983,14 @@ local function CreateInterface()
         ContentArea.BorderSizePixel = 0
         ContentArea.Parent = MainFrame
 
-        local Tabs = {"Aim Assist", "ESP", "Movement", "Teleport", "Skills", "Atalhos", "Settings"}
+        local Tabs = {"Aim Assist", "ESP", "Movement", "Teleport", "Skills", "Performance", "Atalhos", "Settings"}
         local TabLabels = {
             ["Aim Assist"] = "Auxílio de mira",
             ["ESP"] = "ESP",
             ["Movement"] = "Movimentação",
             ["Teleport"] = "Teleporte",
             ["Skills"] = "Skills",
+            ["Performance"] = "Performance",
             ["Atalhos"] = "Atalhos",
             ["Settings"] = "Configurações"
         }
@@ -960,7 +1080,9 @@ local function CreateInterface()
             ["Pulo infinito"] = "Pula repetidamente.",
             ["No Cooldown (spam de skills)"] = "Reenvia as teclas das skills em alta frequência.",
             ["Intervalo do No Cooldown"] = "Tempo entre cada ciclo do loop.",
-            ["Teclas das skills"] = "Lista separada por vírgula com tempo opcional."
+            ["Teclas das skills"] = "Lista separada por vírgula com tempo opcional.",
+            ["Anti-Lag (reduz gráficos)"] = "Reduz sombras, partículas e qualidade para aliviar processamento.",
+            ["Fast Input (prioriza teclas)"] = "Prioriza resposta das teclas reduzindo listeners e entradas não usadas."
         }
 
         local function InfoBtn(parent, desc, xo)
@@ -1871,6 +1993,114 @@ local function CreateInterface()
 
         RefreshStatus()
 
+        -- PERFORMANCE TAB
+        local perf = TabContents["Performance"]
+
+        local perfHint = Instance.new("TextLabel")
+        perfHint.Size = UDim2.new(1, 0, 0, 60)
+        perfHint.BackgroundTransparency = 1
+        perfHint.Text = "O Anti-Lag reduz sombras, partículas e qualidade gráfica para aliviar o processamento. O Fast Input prioriza a resposta das teclas reduzindo listeners concorrentes e desativando entradas não usadas."
+        perfHint.TextColor3 = Colors.TextDark
+        perfHint.TextSize = 11
+        perfHint.TextWrapped = true
+        perfHint.Font = Enum.Font.Gotham
+        perfHint.Parent = perf
+
+        local perfStatus = Instance.new("TextLabel")
+        perfStatus.Size = UDim2.new(1, 0, 0, 26)
+        perfStatus.BackgroundTransparency = 1
+        perfStatus.Text = "Status: padrão"
+        perfStatus.TextColor3 = Colors.TextDark
+        perfStatus.TextSize = 12
+        perfStatus.Font = Enum.Font.GothamSemibold
+        perfStatus.TextXAlignment = Enum.TextXAlignment.Left
+        perfStatus.Parent = perf
+
+        local function RefreshPerfStatus()
+            local parts = {}
+            if Performance.AntiLagEnabled then table.insert(parts, "Anti-Lag ON") end
+            if Performance.FastInputEnabled then table.insert(parts, "Fast Input ON") end
+            if #parts == 0 then
+                perfStatus.Text = "Status: padrão"
+                perfStatus.TextColor3 = Colors.TextDark
+            else
+                perfStatus.Text = "Status: " .. table.concat(parts, " | ")
+                perfStatus.TextColor3 = Colors.Success
+            end
+        end
+
+        CreateToggle(perf, "Anti-Lag (reduz gráficos)", Performance.AntiLagEnabled, function(s)
+            Performance.AntiLagEnabled = s
+            if s then
+                ApplyAntiLag()
+            else
+                RestoreGraphics()
+            end
+            RefreshPerfStatus()
+        end, "Performance_AntiLagEnabled")
+
+        CreateToggle(perf, "Fast Input (prioriza teclas)", Performance.FastInputEnabled, function(s)
+            Performance.FastInputEnabled = s
+            if s then
+                EnableFastInput()
+                ApplyInputPriority()
+            else
+                DisableFastInput()
+                RestoreInput()
+            end
+            RefreshPerfStatus()
+        end, "Performance_FastInputEnabled")
+
+        local cleanInputBtn = Instance.new("TextButton")
+        cleanInputBtn.Size = UDim2.new(1, 0, 0, 40)
+        cleanInputBtn.BackgroundColor3 = Colors.Accent
+        cleanInputBtn.BorderSizePixel = 0
+        cleanInputBtn.Text = "LIMPAR CONEXÕES DE INPUT"
+        cleanInputBtn.TextColor3 = Colors.Text
+        cleanInputBtn.TextSize = 13
+        cleanInputBtn.Font = Enum.Font.GothamBold
+        cleanInputBtn.Parent = perf
+        CreateCorner(cleanInputBtn, UDim.new(0, 6))
+        cleanInputBtn.MouseButton1Click:Connect(function()
+            CleanupInputConnections()
+            perfStatus.Text = "Conexões de input limpas"
+            perfStatus.TextColor3 = Colors.Warning
+            task.delay(1.5, RefreshPerfStatus)
+        end)
+
+        local resetPerfBtn = Instance.new("TextButton")
+        resetPerfBtn.Size = UDim2.new(1, 0, 0, 40)
+        resetPerfBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
+        resetPerfBtn.BorderSizePixel = 0
+        resetPerfBtn.Text = "RESTAURAR GRÁFICOS E INPUT"
+        resetPerfBtn.TextColor3 = Colors.Text
+        resetPerfBtn.TextSize = 13
+        resetPerfBtn.Font = Enum.Font.GothamBold
+        resetPerfBtn.Parent = perf
+        CreateCorner(resetPerfBtn, UDim.new(0, 6))
+        resetPerfBtn.MouseButton1Click:Connect(function()
+            Performance.AntiLagEnabled = false
+            Performance.FastInputEnabled = false
+            RestoreGraphics()
+            DisableFastInput()
+            RestoreInput()
+            RefreshPerfStatus()
+            perfStatus.Text = "Tudo restaurado ao padrão"
+            perfStatus.TextColor3 = Colors.Success
+        end)
+
+        UIRefs.Actions["Performance_CleanInput"] = {
+            Label = "Limpar conexões de input (anti-lag de teclas)",
+            Type = "action",
+            Set = function() return nil end,
+            Get = function() return false end,
+            Apply = function()
+                CleanupInputConnections()
+            end
+        }
+
+        RefreshPerfStatus()
+
         -- ATALHOS TAB
         local at = TabContents["Atalhos"]
         local hint = Instance.new("TextLabel")
@@ -2105,6 +2335,9 @@ local function CreateInterface()
             Movement.Enabled = false
             ToggleFly(false)
             StopNoCooldownLoop()
+            RestoreGraphics()
+            DisableFastInput()
+            RestoreInput()
             ScreenGui:Destroy()
             Env.ESPMokuroRunning = nil
             if Connection then Connection:Disconnect() end
@@ -2174,6 +2407,10 @@ pcall(function()
 end)
 
 Connection = RunService.RenderStepped:Connect(function()
+    Performance.FrameSkipCounter = Performance.FrameSkipCounter + 1
+    if Performance.AntiLagEnabled and (Performance.FrameSkipCounter % 2 == 0) then
+        return
+    end
     pcall(function()
         Camera = Workspace.CurrentCamera or Camera
         ApplyAimAssist()
@@ -2232,6 +2469,13 @@ end)
 
 CreateInterface()
 
-print("=== MOKURO HUB v4.5 - LOADED ===")
-print("Botão 'REDEFINIR TODOS OS ATALHOS' na aba Atalhos")
-print("Botão 'LIMPAR' em cada linha de atalho")
+if Performance.AntiLagEnabled then
+    ApplyAntiLag()
+end
+if Performance.FastInputEnabled then
+    EnableFastInput()
+    ApplyInputPriority()
+end
+
+print("=== MOKURO HUB v4.6 - LOADED ===")
+print("Aba Performance: Anti-Lag, Fast Input, Limpar Input, Restaurar")
