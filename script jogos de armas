@@ -1,5 +1,6 @@
 -- MOKURO HUB
 -- ESP, Aim Assist, Teleport, Movement, Skills NC, Dash, Atalhos, Performance
+-- FOV retangular + proporções + personalizado | Mouse1-only aim
 
 local Env = (getgenv and getgenv()) or _G
 if Env.ESPMokuroRunning then
@@ -38,7 +39,7 @@ print("[Mokuro Hub] Serviços carregados")
 
 -- ==================== SAVE SYSTEM ====================
 local SaveSystem = {
-    ConfigName = "MokuroHub_Config_v53",
+    ConfigName = "MokuroHub_Config_v54",
     DefaultConfig = {
         AimAssist_Enabled = false,
         AimAssist_AlwaysOn = false,
@@ -61,6 +62,10 @@ local SaveSystem = {
         AimAssist_CustomAimX = 0,
         AimAssist_CustomAimY = 0,
         AimAssist_CustomAimActive = false,
+        AimAssist_FOVShape = "Circulo",
+        AimAssist_FOVAspect = "16:9",
+        AimAssist_FOVCustomW = 1024,
+        AimAssist_FOVCustomH = 768,
         ESP_Enabled = false,
         ESP_TeamCheck = false,
         ESP_Boxes = true,
@@ -88,9 +93,9 @@ local SaveSystem = {
         Skills_CooldownInterval = 0.15,
         Skills_SkillKeys = "Z,X,C,V,F",
         Skills_PerSkillDelay = 0.05,
-        Performance_AntiLagEnabled = false,
-        Performance_FastInputEnabled = false,
-        Performance_NoAttackAnimEnabled = false,
+        Performance_InstantSkill = false,
+        Performance_NoAnim = false,
+        Performance_AntiCam = false,
     }
 }
 
@@ -165,7 +170,66 @@ local AimAssist = {
     SelectedPlayerName = "Automático",
     CustomAimActive = SavedConfig.AimAssist_CustomAimActive or false,
     CustomAimPos = Vector2.new(SavedConfig.AimAssist_CustomAimX or 0, SavedConfig.AimAssist_CustomAimY or 0),
+    FOVShape = SavedConfig.AimAssist_FOVShape or "Circulo",
+    FOVAspect = SavedConfig.AimAssist_FOVAspect or "16:9",
+    FOVCustomW = SavedConfig.AimAssist_FOVCustomW or 1024,
+    FOVCustomH = SavedConfig.AimAssist_FOVCustomH or 768,
 }
+
+-- ==================== FOV GEOMETRY ====================
+-- O FOV é a "área de mira". Em modo Círculo: raio = FOV.
+-- Em modo Retângulo: largura = FOV, altura = FOV * (H/W) da proporção escolhida.
+-- O centro é sempre o ponto de referência da mira.
+local FOVGeometry = {}
+
+function FOVGeometry:GetAspectRatio()
+    if AimAssist.FOVShape == "Circulo" then return 1 end
+    local w, h = 16, 9
+    if AimAssist.FOVAspect == "Personalizado" then
+        w = math.max(1, tonumber(AimAssist.FOVCustomW) or 1024)
+        h = math.max(1, tonumber(AimAssist.FOVCustomH) or 768)
+    else
+        local a, b = tostring(AimAssist.FOVAspect):match("(%d+):(%d+)")
+        if a and b then w, h = tonumber(a), tonumber(b) end
+    end
+    return h / w
+end
+
+-- Retorna largura, altura e se é retângulo
+function FOVGeometry:GetSize(radius)
+    if AimAssist.FOVShape == "Circulo" then
+        return radius * 2, radius * 2, false
+    end
+    local hw = radius
+    local hh = radius * self:GetAspectRatio()
+    return hw * 2, hh * 2, true
+end
+
+-- Checa se um ponto (screenX, screenY) cai dentro da área de mira
+function FOVGeometry:Contains(center, screenX, screenY, radius)
+    local dx = screenX - center.X
+    local dy = screenY - center.Y
+    if AimAssist.FOVShape == "Circulo" then
+        return (dx*dx + dy*dy) <= (radius*radius)
+    end
+    local hw = radius
+    local hh = radius * self:GetAspectRatio()
+    return math.abs(dx) <= hw and math.abs(dy) <= hh
+end
+
+-- Retorna a "distância normalizada" 0..1 (fração da borda) para prioridade
+function FOVGeometry:NormalizedDistance(center, screenX, screenY, radius)
+    local dx = screenX - center.X
+    local dy = screenY - center.Y
+    if AimAssist.FOVShape == "Circulo" then
+        return math.sqrt(dx*dx + dy*dy) / math.max(radius, 0.001)
+    end
+    local hw = radius
+    local hh = radius * self:GetAspectRatio()
+    local nx = math.abs(dx) / math.max(hw, 0.001)
+    local ny = math.abs(dy) / math.max(hh, 0.001)
+    return math.max(nx, ny)
+end
 
 local Movement = {
     Enabled = SavedConfig.Movement_Enabled,
@@ -192,15 +256,10 @@ local Skills = {
 }
 
 local Performance = {
-    AntiLagEnabled = SavedConfig.Performance_AntiLagEnabled or false,
-    FastInputEnabled = SavedConfig.Performance_FastInputEnabled or false,
-    NoAttackAnimEnabled = SavedConfig.Performance_NoAttackAnimEnabled or false,
-    InputConnections = {},
-    FrameSkipCounter = 0,
-    OriginalQuality = Enum.QualityLevel.Level08,
+    InstantSkillActive = SavedConfig.Performance_InstantSkill or false,
+    NoAnimActive = SavedConfig.Performance_NoAnim or false,
+    AntiCamActive = SavedConfig.Performance_AntiCam or false,
     CleanLoopThread = nil,
-    HookedAnimators = {},
-    HookedTracks = {},
 }
 
 -- ==================== SKILL KEYS PARSER ====================
@@ -288,6 +347,7 @@ local ESPObjects = {}
 local CurrentTarget = nil
 local LockedTarget = nil
 local FOV_Circle = nil
+local FOV_Rect = nil
 local Connection = nil
 local IsShooting = false
 local LastClickTime = 0
@@ -359,6 +419,10 @@ local function SaveCurrentConfig()
         AimAssist_CustomAimActive = AimAssist.CustomAimActive,
         AimAssist_CustomAimX = AimAssist.CustomAimPos.X,
         AimAssist_CustomAimY = AimAssist.CustomAimPos.Y,
+        AimAssist_FOVShape = AimAssist.FOVShape,
+        AimAssist_FOVAspect = AimAssist.FOVAspect,
+        AimAssist_FOVCustomW = AimAssist.FOVCustomW,
+        AimAssist_FOVCustomH = AimAssist.FOVCustomH,
         ESP_Enabled = ESP.Enabled,
         ESP_TeamCheck = ESP.TeamCheck,
         ESP_Boxes = ESP.Boxes,
@@ -386,293 +450,11 @@ local function SaveCurrentConfig()
         Skills_CooldownInterval = Skills.CooldownInterval,
         Skills_SkillKeys = Skills.SkillKeysStr,
         Skills_PerSkillDelay = Skills.PerSkillDelay,
-        Performance_AntiLagEnabled = Performance.AntiLagEnabled,
-        Performance_FastInputEnabled = Performance.FastInputEnabled,
-        Performance_NoAttackAnimEnabled = Performance.NoAttackAnimEnabled,
+        Performance_InstantSkill = Performance.InstantSkillActive,
+        Performance_NoAnim = Performance.NoAnimActive,
+        Performance_AntiCam = Performance.AntiCamActive,
     }
     SaveSystem:Save(config)
-end
-
--- ==================== ANTI-LAG SYSTEM ====================
-local function CleanupInputConnections()
-    for _, conn in ipairs(Performance.InputConnections) do
-        pcall(function() conn:Disconnect() end)
-    end
-    Performance.InputConnections = {}
-end
-
-local function RegisterInputConnection(conn)
-    table.insert(Performance.InputConnections, conn)
-    return conn
-end
-
-local function ApplyAntiLag()
-    pcall(function()
-        Performance.OriginalQuality = settings().Rendering.QualityLevel
-    end)
-    pcall(function()
-        Lighting.GlobalShadows = false
-        Lighting.FogEnd = 100000
-        for _, effect in ipairs(Lighting:GetChildren()) do
-            if effect:IsA("BlurEffect") or effect:IsA("SunRaysEffect") or effect:IsA("ColorCorrectionEffect") then
-                effect.Enabled = false
-            end
-        end
-    end)
-    pcall(function()
-        settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
-    end)
-    pcall(function()
-        for _, obj in ipairs(Workspace:GetDescendants()) do
-            if obj:IsA("ParticleEmitter") then obj.Enabled = false
-            elseif obj:IsA("Trail") then obj.Enabled = false
-            elseif obj:IsA("Smoke") then obj.Enabled = false
-            elseif obj:IsA("Fire") then obj.Enabled = false
-            elseif obj:IsA("Sparkles") then obj.Enabled = false
-            end
-        end
-    end)
-    pcall(function()
-        for _, player in pairs(Players:GetPlayers()) do
-            if player ~= LocalPlayer and player.Character then
-                local char = player.Character
-                local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                local theirRoot = char:FindFirstChild("HumanoidRootPart")
-                if myRoot and theirRoot then
-                    local dist = (myRoot.Position - theirRoot.Position).Magnitude
-                    if dist > 500 then
-                        for _, part in pairs(char:GetDescendants()) do
-                            if part:IsA("BasePart") and part.Material ~= Enum.Material.SmoothPlastic then
-                                part.Material = Enum.Material.SmoothPlastic
-                            end
-                            if part:IsA("Decal") then part.Transparency = 1 end
-                        end
-                    end
-                end
-            end
-        end
-    end)
-end
-
-local function RestoreGraphics()
-    pcall(function()
-        Lighting.GlobalShadows = true
-        Lighting.FogEnd = 100000
-    end)
-    pcall(function()
-        settings().Rendering.QualityLevel = Performance.OriginalQuality
-    end)
-end
-
-local function ApplyInputPriority()
-    pcall(function()
-        UserInputService.MouseDeltaSensitivity = 1
-        UserInputService.TouchCameraSensitivity = 1
-    end)
-    pcall(function()
-        if UserInputService.GamepadEnabled then
-            UserInputService.GamepadEnabled = false
-        end
-    end)
-    pcall(function()
-        if UserInputService.TouchEnabled then
-            UserInputService.TouchEnabled = false
-        end
-    end)
-end
-
-local function RestoreInput()
-    pcall(function()
-        UserInputService.MouseDeltaSensitivity = 1
-        UserInputService.TouchCameraSensitivity = 1
-    end)
-end
-
-local function EnableFastInput()
-    CleanupInputConnections()
-end
-
-local function DisableFastInput()
-    CleanupInputConnections()
-end
-
--- ==================== NO ATTACK ANIMATION (SAFE HOOKS) ====================
-local AttackAnimKeywords = {
-    "attack", "slash", "punch", "kick", "combo", "m1", "m2",
-    "skill", "swing", "strike", "hit", "melee", "sword", "gun",
-    "atk", "shoot", "cast", "dash", "dodge", "barrage", "blast",
-    "claw", "bite", "flame", "ice", "lightning", "dark",
-}
-
-local function IsAttackAnimation(animName)
-    local lower = string.lower(animName or "")
-    for _, kw in ipairs(AttackAnimKeywords) do
-        if string.find(lower, kw, 1, true) then return true end
-    end
-    return false
-end
-
-local function IsAttackTrack(track)
-    if not track then return false end
-    local result = false
-    pcall(function()
-        local anim = track.Animation
-        if anim then
-            local name = anim.Name or ""
-            local id = anim.AnimationId or ""
-            if IsAttackAnimation(name) or IsAttackAnimation(id) then result = true end
-        end
-    end)
-    return result
-end
-
-local function MakeFakeTrack(animation)
-    return {
-        Play = function() end,
-        Stop = function() end,
-        AdjustSpeed = function() end,
-        AdjustWeight = function() end,
-        Destroy = function() end,
-        Animation = animation,
-        IsPlaying = false,
-        Length = 0,
-        TimePosition = 0,
-        Speed = 1,
-        WeightCurrent = 0,
-        WeightTarget = 0,
-        Priority = Enum.AnimationPriority.Idle,
-        KeyframeReached = { Connect = function() return { Disconnect = function() end } end },
-        Stopped = { Connect = function() return { Disconnect = function() end } end },
-        DidLoop = { Connect = function() return { Disconnect = function() end } end },
-    }
-end
-
-local function SafeWrap(wrapper)
-    if newcclosure then
-        local ok, result = pcall(newcclosure, wrapper)
-        if ok and result then return result end
-    end
-    return wrapper
-end
-
-local function HookAnimatorInstance(animator)
-    if not animator or Performance.HookedAnimators[animator] then return end
-    Performance.HookedAnimators[animator] = true
-    pcall(function()
-        local originalLoad = animator.LoadAnimation
-        if not originalLoad then return end
-        local wrapper = function(self, animation)
-            if Performance.NoAttackAnimEnabled then
-                local name = ""
-                pcall(function() name = animation and animation.Name or "" end)
-                if IsAttackAnimation(name) then return MakeFakeTrack(animation) end
-            end
-            return originalLoad(self, animation)
-        end
-        animator.LoadAnimation = SafeWrap(wrapper)
-    end)
-end
-
-local function HookHumanoid(hum)
-    if not hum then return end
-    pcall(function()
-        if hum.LoadAnimation and not hum._MokuroHooked then
-            hum._MokuroHooked = true
-            local oldLoad = hum.LoadAnimation
-            local wrapper = function(self, animation)
-                if Performance.NoAttackAnimEnabled then
-                    local name = ""
-                    pcall(function() name = animation and animation.Name or "" end)
-                    if IsAttackAnimation(name) then return MakeFakeTrack(animation) end
-                end
-                return oldLoad(self, animation)
-            end
-            hum.LoadAnimation = SafeWrap(wrapper)
-        end
-    end)
-    pcall(function()
-        local animator = hum:FindFirstChildOfClass("Animator")
-        if animator then
-            HookAnimatorInstance(animator)
-        else
-            hum.ChildAdded:Connect(function(child)
-                if child:IsA("Animator") and Performance.NoAttackAnimEnabled then
-                    HookAnimatorInstance(child)
-                end
-            end)
-        end
-    end)
-end
-
-local function HookTrack(track)
-    if not track or Performance.HookedTracks[track] then return end
-    Performance.HookedTracks[track] = true
-    pcall(function()
-        local oldPlay = track.Play
-        if not oldPlay then return end
-        local wrapper = function(self, ...)
-            if Performance.NoAttackAnimEnabled and IsAttackTrack(track) then
-                return
-            end
-            return oldPlay(self, ...)
-        end
-        track.Play = SafeWrap(wrapper)
-    end)
-end
-
-local function StartCleanLoop()
-    if Performance.CleanLoopThread then
-        pcall(function() task.cancel(Performance.CleanLoopThread) end)
-    end
-    Performance.CleanLoopThread = task.spawn(function()
-        while Performance.NoAttackAnimEnabled do
-            pcall(function()
-                local char = LocalPlayer.Character
-                if char then
-                    local hum = char:FindFirstChildOfClass("Humanoid")
-                    if hum then
-                        local animator = hum:FindFirstChildOfClass("Animator")
-                        if animator then
-                            for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
-                                HookTrack(track)
-                                if IsAttackTrack(track) then
-                                    pcall(function()
-                                        track:Stop(0)
-                                        track:Destroy()
-                                    end)
-                                end
-                            end
-                        end
-                    end
-                end
-            end)
-            task.wait(0.03)
-        end
-    end)
-end
-
-local function SetupAttackAnimHook()
-    pcall(function()
-        local char = LocalPlayer.Character
-        if not char then return end
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if not hum then return end
-        HookHumanoid(hum)
-    end)
-    StartCleanLoop()
-end
-
-local function EnableNoAttackAnim()
-    Performance.NoAttackAnimEnabled = true
-    pcall(SetupAttackAnimHook)
-end
-
-local function DisableNoAttackAnim()
-    Performance.NoAttackAnimEnabled = false
-    if Performance.CleanLoopThread then
-        pcall(function() task.cancel(Performance.CleanLoopThread) end)
-        Performance.CleanLoopThread = nil
-    end
 end
 
 -- ==================== ESP SYSTEM ====================
@@ -766,25 +548,38 @@ local function GetAimReferencePoint()
     return Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
 end
 
+-- Calcula "score" para prioridade FOV — agora usando geometria retangular ou circular
+local function FOVScore(screenX, screenY)
+    local center = GetAimReferencePoint()
+    local radius = (AimAssist.PriorityMode == "Distance") and AimAssist.MaxFOVForDistance or AimAssist.FOV
+    return FOVGeometry:NormalizedDistance(center, screenX, screenY, radius)
+end
+
+local function InFOV(screenX, screenY)
+    local center = GetAimReferencePoint()
+    local radius = (AimAssist.PriorityMode == "Distance") and AimAssist.MaxFOVForDistance or AimAssist.FOV
+    return FOVGeometry:Contains(center, screenX, screenY, radius)
+end
+
 local function GetClosestPlayerByDistance()
     if not LocalPlayer.Character then return nil end
     local myHum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
     local myRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart") or LocalPlayer.Character:FindFirstChild("Torso")
     if not myHum or not myRoot or myHum.Health <= 0 then return nil end
     local closest, shortest = nil, AimAssist.MaxDistance
-    local center = GetAimReferencePoint()
+
     if AimAssist.LockTarget and LockedTarget and LockedTarget.Character then
         local tp = GetTargetPart(LockedTarget.Character)
         local hum = LockedTarget.Character:FindFirstChildOfClass("Humanoid")
         if tp and hum and hum.Health > 0 then
             local ok, sp, on = pcall(function() return Camera:WorldToViewportPoint(tp.Position) end)
             if ok and on then
-                local d = (Vector2.new(sp.X, sp.Y) - center).Magnitude
-                if d <= AimAssist.MaxFOVForDistance then return LockedTarget end
+                if InFOV(sp.X, sp.Y) then return LockedTarget end
             end
         end
         LockedTarget = nil
     end
+
     for _, player in pairs(Players:GetPlayers()) do
         if player ~= LocalPlayer and not (AimAssist.TeamCheck and IsTeammate(player)) then
             local char = player.Character
@@ -796,8 +591,7 @@ local function GetClosestPlayerByDistance()
                     if d3 <= AimAssist.MaxDistance then
                         local ok, sp, on = pcall(function() return Camera:WorldToViewportPoint(tp.Position) end)
                         if ok and on then
-                            local d = (Vector2.new(sp.X, sp.Y) - center).Magnitude
-                            if d <= AimAssist.MaxFOVForDistance and not (AimAssist.VisibilityCheck and not IsVisible(tp.Position)) then
+                            if InFOV(sp.X, sp.Y) and not (AimAssist.VisibilityCheck and not IsVisible(tp.Position)) then
                                 if d3 < shortest then shortest = d3; closest = player end
                             end
                         end
@@ -815,20 +609,18 @@ local function GetClosestPlayerByFOV()
     local myHum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
     local myRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart") or LocalPlayer.Character:FindFirstChild("Torso")
     if not myHum or not myRoot or myHum.Health <= 0 then return nil end
-    local closest, shortest = nil, AimAssist.FOV
-    local center = GetAimReferencePoint()
+    local closest, shortest = nil, math.huge
+
     if AimAssist.LockTarget and LockedTarget and LockedTarget.Character then
         local tp = GetTargetPart(LockedTarget.Character)
         local hum = LockedTarget.Character:FindFirstChildOfClass("Humanoid")
         if tp and hum and hum.Health > 0 then
             local ok, sp, on = pcall(function() return Camera:WorldToViewportPoint(tp.Position) end)
-            if ok and on then
-                local d = (Vector2.new(sp.X, sp.Y) - center).Magnitude
-                if d <= AimAssist.FOV then return LockedTarget end
-            end
+            if ok and on and InFOV(sp.X, sp.Y) then return LockedTarget end
         end
         LockedTarget = nil
     end
+
     for _, player in pairs(Players:GetPlayers()) do
         if player ~= LocalPlayer and not (AimAssist.TeamCheck and IsTeammate(player)) then
             local char = player.Character
@@ -840,8 +632,10 @@ local function GetClosestPlayerByFOV()
                     if d3 <= AimAssist.MaxDistance then
                         local ok, sp, on = pcall(function() return Camera:WorldToViewportPoint(tp.Position) end)
                         if ok and on and not (AimAssist.VisibilityCheck and not IsVisible(tp.Position)) then
-                            local d = (Vector2.new(sp.X, sp.Y) - center).Magnitude
-                            if d < shortest then shortest = d; closest = player end
+                            if InFOV(sp.X, sp.Y) then
+                                local score = FOVScore(sp.X, sp.Y)
+                                if score < shortest then shortest = score; closest = player end
+                            end
                         end
                     end
                 end
@@ -878,7 +672,6 @@ local function GetPlayerWithLowestHealth()
     local myRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart") or LocalPlayer.Character:FindFirstChild("Torso")
     if not myHum or not myRoot or myHum.Health <= 0 then return nil end
     local lowest, lowestRatio = nil, math.huge
-    local center = GetAimReferencePoint()
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer and not (AimAssist.TeamCheck and IsTeammate(player)) then
             local char = player.Character
@@ -889,13 +682,9 @@ local function GetPlayerWithLowestHealth()
                     local d3 = (myRoot.Position - tp.Position).Magnitude
                     if d3 <= AimAssist.MaxDistance then
                         local ok, sp, on = pcall(function() return Camera:WorldToViewportPoint(tp.Position) end)
-                        if ok and on then
-                            local d = (Vector2.new(sp.X, sp.Y) - center).Magnitude
-                            local allowed = AimAssist.PriorityMode == "Distance" and AimAssist.MaxFOVForDistance or AimAssist.FOV
-                            if d <= allowed and not (AimAssist.VisibilityCheck and not IsVisible(tp.Position)) then
-                                local ratio = hum.Health / hum.MaxHealth
-                                if ratio < lowestRatio then lowestRatio = ratio; lowest = player end
-                            end
+                        if ok and on and InFOV(sp.X, sp.Y) and not (AimAssist.VisibilityCheck and not IsVisible(tp.Position)) then
+                            local ratio = hum.Health / hum.MaxHealth
+                            if ratio < lowestRatio then lowestRatio = ratio; lowest = player end
                         end
                     end
                 end
@@ -914,7 +703,6 @@ local function GetClosestPlayer()
 end
 
 local function ApplyAimAssist()
-    -- AlwaysOn só funciona quando o Aim Assist principal está ativado
     local should = AimAssist.Enabled and (AimAssist.AlwaysOn or not AimAssist.ShootToActivate or IsShooting)
     if not should then
         CurrentTarget = nil
@@ -966,21 +754,70 @@ local function ApplyAimAssist()
     end
 end
 
+-- ==================== FOV DRAW ====================
+-- Desenha círculo OU retângulo. O retângulo é "expandido" a partir do centro,
+-- com largura = 2*FOV e altura = 2*FOV*(H/W).
+local function UpdateFOVDrawing()
+    local center = GetAimReferencePoint()
+    local radius = (AimAssist.PriorityMode == "Distance") and AimAssist.MaxFOVForDistance or AimAssist.FOV
+    local show = AimAssist.Enabled and (AimAssist.AlwaysOn or (IsShooting or not AimAssist.ShootToActivate))
+
+    local color
+    local thickness
+    if CurrentTarget and IsShooting then
+        color = Color3.fromRGB(255, 50, 50); thickness = 3
+    elseif CurrentTarget then
+        color = Color3.fromRGB(255, 200, 50); thickness = 2.5
+    else
+        color = (AimAssist.PriorityMode == "Distance") and Color3.fromRGB(0, 200, 255) or Color3.fromRGB(100, 100, 100)
+        thickness = 1.5
+    end
+
+    local isRect = AimAssist.FOVShape ~= "Circulo"
+
+    if isRect then
+        if FOV_Circle then FOV_Circle.Visible = false end
+        if not FOV_Rect then
+            pcall(function()
+                FOV_Rect = Drawing.new("Square")
+                FOV_Rect.Filled = false
+            end)
+        end
+        if FOV_Rect then
+            if not show then
+                FOV_Rect.Visible = false
+                return
+            end
+            local w, h = FOVGeometry:GetSize(radius)
+            FOV_Rect.Size = Vector2.new(w, h)
+            FOV_Rect.Position = Vector2.new(center.X - w/2, center.Y - h/2)
+            FOV_Rect.Color = color
+            FOV_Rect.Thickness = thickness
+            FOV_Rect.Visible = true
+        end
+    else
+        if FOV_Rect then FOV_Rect.Visible = false end
+        if not FOV_Circle then
+            pcall(function()
+                FOV_Circle = Drawing.new("Circle")
+                FOV_Circle.Thickness = 2
+            end)
+        end
+        if FOV_Circle then
+            FOV_Circle.Visible = show
+            FOV_Circle.Position = center
+            FOV_Circle.Radius = radius
+            FOV_Circle.Color = color
+            FOV_Circle.Thickness = thickness
+        end
+    end
+end
+
 local function UpdateESP()
     if not LocalPlayer.Character then return end
     local myRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart") or LocalPlayer.Character:FindFirstChild("Torso")
     if not myRoot then return end
-    local cp = GetAimReferencePoint()
-    if FOV_Circle then
-        local show = AimAssist.AlwaysOn or (AimAssist.Enabled and (IsShooting or not AimAssist.ShootToActivate))
-        FOV_Circle.Visible = show
-        FOV_Circle.Position = cp
-        if AimAssist.PriorityMode == "Distance" then FOV_Circle.Radius = AimAssist.MaxFOVForDistance; FOV_Circle.Color = Color3.fromRGB(0, 200, 255)
-        else FOV_Circle.Radius = AimAssist.FOV; FOV_Circle.Color = Colors.Accent end
-        if CurrentTarget and IsShooting then FOV_Circle.Thickness = 2.5; FOV_Circle.Color = Color3.fromRGB(255, 50, 50)
-        elseif CurrentTarget then FOV_Circle.Thickness = 2; FOV_Circle.Color = Color3.fromRGB(255, 200, 50)
-        else FOV_Circle.Thickness = 1.5; FOV_Circle.Color = Color3.fromRGB(100, 100, 100) end
-    end
+    UpdateFOVDrawing()
     for player, d in pairs(ESPObjects) do
         pcall(function()
             if not ESP.Enabled then for _, v in pairs(d) do if v then v.Visible = false end end; return end
@@ -1117,7 +954,6 @@ local function ToggleFly(enabled)
     end
 end
 
--- ==================== DASH / IMPULSO NA DIREÇÃO DO MOUSE ====================
 local function DoDash()
     local char = LocalPlayer.Character
     if not char then return end
@@ -1125,7 +961,6 @@ local function DoDash()
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
 
-    -- Usa a direção do raio do mouse, não um ponto de destino/teleporte.
     local dir
     local ok, mouseRay = pcall(function()
         return Mouse.UnitRay
@@ -1142,7 +977,6 @@ local function DoDash()
     if not dir or dir.Magnitude < 0.01 then return end
     dir = dir.Unit
 
-    -- Remove um dash anterior para não acumular forças.
     for _, obj in ipairs(hrp:GetChildren()) do
         if obj.Name == "MokuroDashVelocity" then
             pcall(function() obj:Destroy() end)
@@ -1156,7 +990,6 @@ local function DoDash()
     bv.Velocity = dir * Movement.DashSpeed
     bv.Parent = hrp
 
-    -- Mantém o impulso por mais tempo para percorrer uma distância maior.
     task.delay(0.45, function()
         if bv and bv.Parent then
             pcall(function() bv:Destroy() end)
@@ -1179,22 +1012,17 @@ local function ToggleDash(enabled)
     end
 end
 
--- ==================== MINIMIZAR / RESTAURAR (INSERT) ====================
 local function DoMinimize()
     if not ScreenGui or not MainFrame then return end
 
     if IsMinimized then
-        -- Restaura a interface completa
         ScreenGui.Enabled = true
         MainFrame.Size = OriginalMainFrameSize
         MainFrame.Position = OriginalMainFramePos
         IsMinimized = false
     else
-        -- Guarda o tamanho e a posição antes de ocultar tudo
         OriginalMainFrameSize = MainFrame.Size
         OriginalMainFramePos = MainFrame.Position
-
-        -- Esconde a ScreenGui inteira: não sobra TitleBar nem caixinha
         ScreenGui.Enabled = false
         IsMinimized = true
     end
@@ -1264,15 +1092,12 @@ local function CreateInterface()
             ToggleFly(false)
             ToggleDash(false)
             StopNoCooldownLoop()
-            RestoreGraphics()
-            DisableFastInput()
-            RestoreInput()
-            DisableNoAttackAnim()
             if DragConnection then DragConnection:Disconnect(); DragConnection = nil end
             ScreenGui:Destroy()
             Env.ESPMokuroRunning = nil
             if Connection then Connection:Disconnect() end
-            if FOV_Circle then FOV_Circle:Remove() end
+            if FOV_Circle then FOV_Circle:Remove(); FOV_Circle = nil end
+            if FOV_Rect then FOV_Rect:Remove(); FOV_Rect = nil end
             for _, obj in pairs(ESPObjects) do
                 for _, d in pairs(obj) do if d then pcall(function() d:Remove() end) end end
             end
@@ -1387,7 +1212,7 @@ local function CreateInterface()
         end
 
         local Help = {
-            ["Ativar auxílio de mira"] = "Liga ou desliga o auxílio de mira.",
+            ["Ativar auxílio de mira"] = "Liga ou desliga o auxílio de mira. Só ativa com Mouse1 (botão esquerdo).",
             ["Sempre ativado"] = "Mantém a mira ativa sem segurar o botão.",
             ["Ativar ao atirar"] = "Só aplica ao segurar o Mouse1.",
             ["Verificar equipe (não mirar em aliados)"] = "Ignora aliados.",
@@ -1397,9 +1222,13 @@ local function CreateInterface()
             ["Parte principal do alvo"] = "Parte usada como referência.",
             ["Selecionar jogador específico"] = "Escolhe um jogador.",
             ["Modo de prioridade"] = "FOV ou Distância.",
-            ["Tamanho do campo de visão"] = "Raio da área de mira.",
+            ["Tamanho do campo de visão"] = "Largura (ou raio) da área de mira.",
             ["Distância máxima"] = "Distância máxima para alvo.",
             ["Suavidade da mira"] = "Suavidade do movimento.",
+            ["Forma do FOV"] = "Círculo ou Retângulo.",
+            ["Proporção do FOV"] = "16:9, 4:3, etc. Personalizado usa os campos abaixo.",
+            ["Largura personalizada"] = "Largura em pixels do retângulo (ex: 1024).",
+            ["Altura personalizada"] = "Altura em pixels do retângulo (ex: 768).",
             ["Ativar ESP"] = "Mostra info dos jogadores.",
             ["Verificar equipe (ocultar aliados)"] = "Oculta aliados.",
             ["Caixas"] = "Caixas ao redor.",
@@ -1415,14 +1244,12 @@ local function CreateInterface()
             ["Velocidade de voo"] = "Velocidade do voo.",
             ["Atravessar objetos (NoClip)"] = "Atravessa partes.",
             ["Pulo infinito"] = "Pula repetidamente.",
-            ["Dash / Impulso pra frente"] = "Arremessa o personagem na direção da câmera (cima/baixo/frente).",
+            ["Dash / Impulso pra frente"] = "Arremessa o personagem na direção da câmera.",
             ["Velocidade do Dash"] = "Força do impulso do dash.",
             ["No Cooldown (spam de skills)"] = "Reenvia as teclas das skills em alta frequência.",
             ["Intervalo do No Cooldown"] = "Tempo entre cada ciclo do loop.",
-            ["Teclas das skills"] = "Lista separada por vírgula com tempo opcional.",
-            ["Anti-Lag (reduz gráficos)"] = "Reduz sombras, partículas e qualidade para aliviar processamento.",
-            ["Fast Input (prioriza teclas)"] = "Prioriza resposta das teclas reduzindo listeners e entradas não usadas.",
-            ["Remover animação de ataque"] = "Bloqueia animações de ataque em 3 camadas com proteção contra falhas."
+            ["Anti-Lag (reduz gráficos)"] = "Reduz sombras, partículas e qualidade.",
+            ["Remover animação de ataque"] = "Bloqueia animações de ataque."
         }
 
         local function InfoBtn(parent, desc, xo)
@@ -1547,7 +1374,7 @@ local function CreateInterface()
             sb.Parent = f
             CreateCorner(sb, UDim.new(0, 3))
             local fill = Instance.new("Frame")
-            local fp = (default - min) / (max - min)
+            local fp = (default - min) / math.max(max - min, 1)
             fill.Size = UDim2.new(fp, 0, 1, 0)
             fill.BackgroundColor3 = Colors.Accent
             fill.BorderSizePixel = 0
@@ -1562,7 +1389,7 @@ local function CreateInterface()
             CreateCorner(kn, UDim.new(1, 0))
             local dr = false
             local function U(i)
-                local rx = math.clamp((i.Position.X - sb.AbsolutePosition.X) / sb.AbsoluteSize.X, 0, 1)
+                local rx = math.clamp((i.Position.X - sb.AbsolutePosition.X) / math.max(sb.AbsoluteSize.X, 1), 0, 1)
                 local v = math.floor(min + (rx * (max - min)))
                 vl.Text = tostring(v)
                 fill.Size = UDim2.new(rx, 0, 1, 0)
@@ -1579,7 +1406,7 @@ local function CreateInterface()
                     Label = text,
                     Set = function(v)
                         vl.Text = tostring(v)
-                        local rx = (v - min) / (max - min)
+                        local rx = (v - min) / math.max(max - min, 1)
                         fill.Size = UDim2.new(rx, 0, 1, 0)
                         kn.Position = UDim2.new(rx, -7, 0.5, -7)
                     end
@@ -1719,6 +1546,31 @@ local function CreateInterface()
         CreateDropdown(aim, "Selecionar jogador específico", po, "Automático", function(v) AimAssist.SelectedPlayerName = v; LockedTarget = nil end)
         CreateDropdown(aim, "Parte principal do alvo", {"Head", "Torso", "HumanoidRootPart", "LeftArm", "RightArm", "LeftLeg", "RightLeg"}, AimAssist.TargetPart, function(v) AimAssist.TargetPart = v end, "AimAssist_TargetPart")
 
+        -- Forma do FOV
+        CreateDropdown(aim, "Forma do FOV", {"Circulo", "Retangulo"}, AimAssist.FOVShape, function(v)
+            AimAssist.FOVShape = v
+        end, "AimAssist_FOVShape")
+
+        -- Proporção
+        CreateDropdown(aim, "Proporção do FOV", {
+            "16:9", "16:10", "4:3", "3:2", "21:9", "1:1", "9:16", "3:4", "Personalizado"
+        }, AimAssist.FOVAspect, function(v)
+            AimAssist.FOVAspect = v
+        end, "AimAssist_FOVAspect")
+
+        -- Largura / Altura personalizadas
+        CreateSlider(aim, "Largura personalizada", 100, 3840, math.clamp(AimAssist.FOVCustomW, 100, 3840), function(v)
+            AimAssist.FOVCustomW = v
+            if AimAssist.FOVAspect == "Personalizado" then
+                -- recalcula FOV baseado na largura (opcional: mantém FOV como largura/2)
+                AimAssist.FOV = math.floor(v / 2)
+            end
+        end, "AimAssist_FOVCustomW")
+
+        CreateSlider(aim, "Altura personalizada", 100, 2160, math.clamp(AimAssist.FOVCustomH, 100, 2160), function(v)
+            AimAssist.FOVCustomH = v
+        end, "AimAssist_FOVCustomH")
+
         local function PrioritySelector(parent)
             local f = Instance.new("Frame")
             f.Size = UDim2.new(1, 0, 0, 54)
@@ -1761,17 +1613,8 @@ local function CreateInterface()
                 b.MouseButton1Click:Connect(function() Apply(v) end)
                 btns[v] = b
             end
-            Make("FOV (centro da tela)", "FOV", 0)
+            Make("FOV (área de mira)", "FOV", 0)
             Make("Distância (mais próximo)", "Distance", 0.5)
-            UIRefs.Actions["AimAssist_PriorityMode"] = {
-                Label = "Modo de prioridade (FOV / Distância)",
-                Type = "cycle",
-                Set = function()
-                    local n = AimAssist.PriorityMode == "FOV" and "Distance" or "FOV"
-                    Apply(n)
-                    return n
-                end
-            }
         end
         PrioritySelector(aim)
 
@@ -1819,15 +1662,6 @@ local function CreateInterface()
             end
             Make("Centro da tela", "Centro da tela", 0)
             Make("Cursor", "Cursor", 0.5)
-            UIRefs.Actions["AimAssist_AimReference"] = {
-                Label = "Ponto de referência (Centro / Cursor)",
-                Type = "cycle",
-                Set = function()
-                    local n = AimAssist.AimReference == "Cursor" and "Centro da tela" or "Cursor"
-                    Apply(n)
-                    return n
-                end
-            }
         end
         RefSelector(aim)
 
@@ -1849,7 +1683,7 @@ local function CreateInterface()
         end)
 
         CreateToggle(aim, "Priorizar jogador com menor vida", AimAssist.LowestHealthPriority, function(s) AimAssist.LowestHealthPriority = s; LockedTarget = nil end, "AimAssist_LowestHealthPriority")
-        CreateSlider(aim, "Tamanho do campo de visão", 10, 1500, AimAssist.FOV, function(v) AimAssist.FOV = v; if FOV_Circle then FOV_Circle.Radius = v end end, "AimAssist_FOV")
+        CreateSlider(aim, "Tamanho do campo de visão", 10, 1500, AimAssist.FOV, function(v) AimAssist.FOV = v end, "AimAssist_FOV")
         CreateSlider(aim, "Distância máxima", 100, 5000, AimAssist.MaxDistance, function(v) AimAssist.MaxDistance = v end, "AimAssist_MaxDistance")
         CreateSlider(aim, "Suavidade da mira", 1, 99, math.floor(AimAssist.Smoothness * 100), function(v) AimAssist.Smoothness = v / 100 end, "AimAssist_Smoothness")
 
@@ -1986,22 +1820,6 @@ local function CreateInterface()
             tpTitle.Text = "Teleportado até " .. SelTP.Name
         end)
         RefreshList()
-
-        UIRefs.Actions["Teleport_Selected"] = {
-            Label = "Teleportar até o jogador selecionado",
-            Type = "action",
-            Set = function() return nil end,
-            Get = function() return false end,
-            Apply = function()
-                if not SelTP or not SelTP.Parent then return end
-                local mc = LocalPlayer.Character
-                local tc = SelTP.Character
-                if not mc or not tc then return end
-                local mr = mc:FindFirstChild("HumanoidRootPart")
-                local tr = tc:FindFirstChild("HumanoidRootPart")
-                if mr and tr then mr.CFrame = tr.CFrame * CFrame.new(0, 0, -3) end
-            end
-        }
 
         -- SKILLS TAB
         local sk = TabContents["Skills"]
@@ -2334,24 +2152,6 @@ local function CreateInterface()
             task.delay(1.5, RefreshStatus)
         end)
 
-        UIRefs.Actions["Skills_FireOnce"] = {
-            Label = "Disparar todas as skills agora",
-            Type = "action",
-            Set = function() return nil end,
-            Get = function() return false end,
-            Apply = function()
-                local entries = ParseSkillKeys(Skills.SkillKeysStr, Skills.PerSkillDelay)
-                for _, entry in ipairs(entries) do
-                    pcall(function()
-                        VirtualInputManager:SendKeyEvent(true, entry.keyCode, false, game)
-                        task.wait(entry.delay)
-                        VirtualInputManager:SendKeyEvent(false, entry.keyCode, false, game)
-                    end)
-                    task.wait(entry.delay)
-                end
-            end
-        }
-
         RefreshStatus()
 
         -- PERFORMANCE TAB
@@ -2360,7 +2160,7 @@ local function CreateInterface()
         local perfHint = Instance.new("TextLabel")
         perfHint.Size = UDim2.new(1, 0, 0, 60)
         perfHint.BackgroundTransparency = 1
-        perfHint.Text = "O Anti-Lag reduz sombras, partículas e qualidade gráfica para aliviar o processamento. O Fast Input prioriza a resposta das teclas reduzindo listeners concorrentes. Remover animação de ataque bloqueia em 3 camadas com proteção contra falhas."
+        perfHint.Text = "O End Lag e a Animação são corrigidos por tracking de AnimationTrack. O Anti Camera Lock destrava a câmera se o alvo morrer."
         perfHint.TextColor3 = Colors.TextDark
         perfHint.TextSize = 11
         perfHint.TextWrapped = true
@@ -2379,9 +2179,9 @@ local function CreateInterface()
 
         local function RefreshPerfStatus()
             local parts = {}
-            if Performance.AntiLagEnabled then table.insert(parts, "Anti-Lag ON") end
-            if Performance.FastInputEnabled then table.insert(parts, "Fast Input ON") end
-            if Performance.NoAttackAnimEnabled then table.insert(parts, "No Attack Anim ON") end
+            if Performance.InstantSkillActive then table.insert(parts, "Instant") end
+            if Performance.NoAnimActive then table.insert(parts, "Sem Anim") end
+            if Performance.AntiCamActive then table.insert(parts, "Anti-Cam") end
             if #parts == 0 then
                 perfStatus.Text = "Status: padrão"
                 perfStatus.TextColor3 = Colors.TextDark
@@ -2391,71 +2191,70 @@ local function CreateInterface()
             end
         end
 
-        CreateToggle(perf, "Anti-Lag (reduz gráficos)", Performance.AntiLagEnabled, function(s)
-            Performance.AntiLagEnabled = s
-            if s then ApplyAntiLag() else RestoreGraphics() end
+        CreateToggle(perf, "Ativar Instant Skill (corta End Lag)", Performance.InstantSkillActive, function(s)
+            Performance.InstantSkillActive = s
             RefreshPerfStatus()
-        end, "Performance_AntiLagEnabled")
+        end, "Performance_InstantSkill")
 
-        CreateToggle(perf, "Fast Input (prioriza teclas)", Performance.FastInputEnabled, function(s)
-            Performance.FastInputEnabled = s
-            if s then EnableFastInput(); ApplyInputPriority() else DisableFastInput(); RestoreInput() end
+        CreateToggle(perf, "Remover Animação de Skill", Performance.NoAnimActive, function(s)
+            Performance.NoAnimActive = s
             RefreshPerfStatus()
-        end, "Performance_FastInputEnabled")
+        end, "Performance_NoAnim")
 
-        CreateToggle(perf, "Remover animação de ataque", Performance.NoAttackAnimEnabled, function(s)
-            Performance.NoAttackAnimEnabled = s
-            if s then EnableNoAttackAnim() else DisableNoAttackAnim() end
+        CreateToggle(perf, "Anti Camera Lock", Performance.AntiCamActive, function(s)
+            Performance.AntiCamActive = s
             RefreshPerfStatus()
-        end, "Performance_NoAttackAnimEnabled")
+        end, "Performance_AntiCam")
 
-        local cleanInputBtn = Instance.new("TextButton")
-        cleanInputBtn.Size = UDim2.new(1, 0, 0, 40)
-        cleanInputBtn.BackgroundColor3 = Colors.Accent
-        cleanInputBtn.BorderSizePixel = 0
-        cleanInputBtn.Text = "LIMPAR CONEXÕES DE INPUT"
-        cleanInputBtn.TextColor3 = Colors.Text
-        cleanInputBtn.TextSize = 13
-        cleanInputBtn.Font = Enum.Font.GothamBold
-        cleanInputBtn.Parent = perf
-        CreateCorner(cleanInputBtn, UDim.new(0, 6))
-        cleanInputBtn.MouseButton1Click:Connect(function()
-            CleanupInputConnections()
-            perfStatus.Text = "Conexões de input limpas"
-            perfStatus.TextColor3 = Colors.Warning
-            task.delay(1.5, RefreshPerfStatus)
-        end)
-
-        local resetPerfBtn = Instance.new("TextButton")
-        resetPerfBtn.Size = UDim2.new(1, 0, 0, 40)
-        resetPerfBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
-        resetPerfBtn.BorderSizePixel = 0
-        resetPerfBtn.Text = "RESTAURAR GRÁFICOS E INPUT"
-        resetPerfBtn.TextColor3 = Colors.Text
-        resetPerfBtn.TextSize = 13
-        resetPerfBtn.Font = Enum.Font.GothamBold
-        resetPerfBtn.Parent = perf
-        CreateCorner(resetPerfBtn, UDim.new(0, 6))
-        resetPerfBtn.MouseButton1Click:Connect(function()
-            Performance.AntiLagEnabled = false
-            Performance.FastInputEnabled = false
-            Performance.NoAttackAnimEnabled = false
-            RestoreGraphics()
-            DisableFastInput()
-            RestoreInput()
-            DisableNoAttackAnim()
-            RefreshPerfStatus()
-            perfStatus.Text = "Tudo restaurado ao padrão"
-            perfStatus.TextColor3 = Colors.Success
-        end)
-
-        UIRefs.Actions["Performance_CleanInput"] = {
-            Label = "Limpar conexões de input (anti-lag de teclas)",
-            Type = "action",
-            Set = function() return nil end,
-            Get = function() return false end,
-            Apply = function() CleanupInputConnections() end
+        local PROTECTED_IDS = {
+            "3367846730", "3367787621", "5119308351", "5119309535"
         }
+
+        local function IsProtected(animId)
+            if type(animId) ~= "string" then return false end
+            for _, id in ipairs(PROTECTED_IDS) do
+                if string.find(animId, id) then return true end
+            end
+            return false
+        end
+
+        task.spawn(function()
+            while task.wait() do
+                if Performance.InstantSkillActive or Performance.NoAnimActive then
+                    local char = LocalPlayer.Character
+                    if char then
+                        local humanoid = char:FindFirstChildOfClass("Humanoid")
+                        if humanoid then
+                            for _, track in ipairs(humanoid:GetPlayingAnimationTracks()) do
+                                if not IsProtected(track.Animation.AnimationId) then
+                                    if Performance.InstantSkillActive then
+                                        track:AdjustSpeed(100)
+                                    end
+                                    if Performance.NoAnimActive then
+                                        track:AdjustWeight(0)
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+                if Performance.AntiCamActive then
+                    local subject = Workspace.CurrentCamera.CameraSubject
+                    local char = LocalPlayer.Character
+                    if subject and char then
+                        local isMyChar = (subject == char or subject.Parent == char)
+                        local hasHumanoid = subject:FindFirstChildOfClass("Humanoid")
+                        if not isMyChar or not hasHumanoid then
+                            local myHumanoid = char:FindFirstChildOfClass("Humanoid")
+                            if myHumanoid then
+                                Workspace.CurrentCamera.CameraSubject = myHumanoid
+                                Workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
+                            end
+                        end
+                    end
+                end
+            end
+        end)
 
         RefreshPerfStatus()
 
@@ -2464,7 +2263,7 @@ local function CreateInterface()
         local hint = Instance.new("TextLabel")
         hint.Size = UDim2.new(1, 0, 0, 50)
         hint.BackgroundTransparency = 1
-        hint.Text = "Clique em DEFINIR TECLA e pressione uma tecla. Teclas usadas pelo NC de Skills são bloqueadas aqui para evitar conflito. As opções de Movimentação ficam primeiro."
+        hint.Text = "Clique em DEFINIR TECLA e pressione uma tecla. Teclas usadas pelo NC de Skills são bloqueadas aqui para evitar conflito."
         hint.TextColor3 = Colors.Text
         hint.TextSize = 11
         hint.TextWrapped = true
@@ -2494,363 +2293,99 @@ local function CreateInterface()
 
         local function ClearAllBindings()
             for _, entry in pairs(ShortcutBindings) do
-                entry.Key = nil
-                entry.Waiting = false
-                entry.Button.Text = "DEFINIR TECLA"
+                if entry.conn then pcall(function() entry.conn:Disconnect() end) end
             end
-            shortcutStatus.Text = "Todos os atalhos foram removidos"
-            shortcutStatus.TextColor3 = Colors.Success
-            task.delay(2, function()
-                if shortcutStatus and shortcutStatus.Parent then shortcutStatus.Text = "" end
-            end)
+            ShortcutBindings = {}
         end
 
-        resetShortcutsBtn.MouseButton1Click:Connect(function() ClearAllBindings() end)
-
-        local function AddRow(key, ref)
-            local r = Instance.new("Frame")
-            r.Size = UDim2.new(1, 0, 0, 42)
-            r.BackgroundColor3 = Colors.ElementBg
-            r.BorderSizePixel = 0
-            r.Parent = at
-            CreateCorner(r, UDim.new(0, 6))
-            local n = Instance.new("TextLabel")
-            n.Size = UDim2.new(1, -220, 1, 0)
-            n.Position = UDim2.new(0, 10, 0, 0)
-            n.BackgroundTransparency = 1
-            n.Text = ref.Label or key
-            n.TextColor3 = Colors.Text
-            n.TextSize = 12
-            n.Font = Enum.Font.GothamSemibold
-            n.TextXAlignment = Enum.TextXAlignment.Left
-            n.Parent = r
-
-            local clearBtn = Instance.new("TextButton")
-            clearBtn.Size = UDim2.new(0, 60, 0, 28)
-            clearBtn.Position = UDim2.new(1, -205, 0.5, -14)
-            clearBtn.BackgroundColor3 = Color3.fromRGB(120, 40, 40)
-            clearBtn.BorderSizePixel = 0
-            clearBtn.Text = "LIMPAR"
-            clearBtn.TextColor3 = Colors.Text
-            clearBtn.TextSize = 10
-            clearBtn.Font = Enum.Font.GothamBold
-            clearBtn.Parent = r
-            CreateCorner(clearBtn, UDim.new(0, 5))
-
-            local b = Instance.new("TextButton")
-            b.Size = UDim2.new(0, 125, 0, 28)
-            b.Position = UDim2.new(1, -135, 0.5, -14)
-            b.BackgroundColor3 = Colors.Background
-            b.BorderSizePixel = 0
-            b.Text = "DEFINIR TECLA"
-            b.TextColor3 = Colors.Text
-            b.TextSize = 10
-            b.Font = Enum.Font.GothamBold
-            b.Parent = r
-            CreateCorner(b, UDim.new(0, 5))
-
-            ShortcutBindings[key] = {
-                Ref = ref, Button = b, ClearButton = clearBtn, Key = nil, Waiting = false,
-                Apply = ref.Apply, Get = ref.Get, Set = ref.Set, Type = ref.Type or "toggle"
-            }
-
-            b.MouseButton1Click:Connect(function()
-                for _, e in pairs(ShortcutBindings) do e.Waiting = false end
-                ShortcutBindings[key].Waiting = true
-                b.Text = "PRESSIONE..."
-                shortcutStatus.Text = ""
-            end)
-
-            clearBtn.MouseButton1Click:Connect(function()
-                local e = ShortcutBindings[key]
-                if e then
-                    e.Key = nil; e.Waiting = false; e.Button.Text = "DEFINIR TECLA"
-                    shortcutStatus.Text = "Atalho removido: " .. (ref.Label or key)
-                    shortcutStatus.TextColor3 = Colors.Success
-                    task.delay(2, function()
-                        if shortcutStatus and shortcutStatus.Parent then shortcutStatus.Text = "" end
-                    end)
-                end
-            end)
-        end
-
-        -- ORDEM DOS ATALHOS (MOVIMENTAÇÃO PRIMEIRO)
-        local ShortcutOrder = {
-            "Movement_Enabled",
-            "Movement_SpeedEnabled",
-            "Movement_JumpEnabled",
-            "Movement_FlyEnabled",
-            "Movement_NoClip",
-            "Movement_InfiniteJump",
-            "Movement_DashEnabled",
-            "Movement_SpeedValue",
-            "Movement_JumpValue",
-            "Movement_FlySpeed",
-            "Movement_DashSpeed",
-            "AimAssist_Enabled",
-            "AimAssist_AlwaysOn",
-            "AimAssist_ShootToActivate",
-            "AimAssist_TeamCheck",
-            "AimAssist_LockTarget",
-            "AimAssist_MagnetMode",
-            "AimAssist_MultiPart",
-            "AimAssist_LowestHealthPriority",
-            "AimAssist_PriorityMode",
-            "AimAssist_AimReference",
-            "AimAssist_FOV",
-            "AimAssist_MaxDistance",
-            "AimAssist_Smoothness",
-            "ESP_Enabled",
-            "ESP_TeamCheck",
-            "ESP_Boxes",
-            "ESP_Names",
-            "ESP_Tracers",
-            "ESP_HealthBar",
-            "ESP_MaxDistance",
-            "Skills_NoCooldownEnabled",
-            "Skills_CooldownInterval",
-            "Skills_FireOnce",
-            "Performance_AntiLagEnabled",
-            "Performance_FastInputEnabled",
-            "Performance_NoAttackAnimEnabled",
-            "Performance_CleanInput",
-            "Teleport_Selected",
-        }
-
-        for _, k in ipairs(ShortcutOrder) do
-            local ref = UIRefs.Toggles[k] or UIRefs.Actions[k] or UIRefs.Sliders[k]
-            if ref then
-                if not ref.Type then
-                    if UIRefs.Sliders[k] then
-                        ref.Type = "action"
-                        ref.Apply = nil
-                    else
-                        ref.Type = "toggle"
-                    end
-                end
-                AddRow(k, ref)
-            end
-        end
-
-        UserInputService.InputBegan:Connect(function(input, gp)
-            if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
-            for key, e in pairs(ShortcutBindings) do
-                if e.Waiting then
-                    e.Waiting = false
-                    if input.KeyCode == Enum.KeyCode.Backspace or input.KeyCode == Enum.KeyCode.Delete then
-                        e.Key = nil; e.Button.Text = "DEFINIR TECLA"; shortcutStatus.Text = ""
-                    elseif input.KeyCode == Enum.KeyCode.Escape then
-                        e.Button.Text = e.Key and e.Key.Name or "DEFINIR TECLA"; shortcutStatus.Text = ""
-                    elseif input.KeyCode ~= Enum.KeyCode.Unknown then
-                        if IsKeySkillKey(input.KeyCode) then
-                            e.Button.Text = e.Key and e.Key.Name or "DEFINIR TECLA"
-                            shortcutStatus.Text = "Tecla bloqueada: já é usada pelo NC de Skills"
-                            shortcutStatus.TextColor3 = Colors.Warning
-                        else
-                            e.Key = input.KeyCode; e.Button.Text = input.KeyCode.Name; shortcutStatus.Text = ""
-                        end
-                    end
-                    return
-                end
-            end
-            if gp then return end
-            if IsKeySkillKey(input.KeyCode) then return end
-            for _, e in pairs(ShortcutBindings) do
-                if e.Key == input.KeyCode then
-                    if e.Type == "cycle" then
-                        local nv = e.Set and e.Set()
-                        if e.Apply and nv ~= nil then e.Apply(nv) end
-                    elseif e.Type == "action" then
-                        if e.Apply then e.Apply() end
-                    else
-                        local ns = not e.Ref.Get()
-                        e.Ref.Set(ns)
-                        if e.Apply then e.Apply(ns) end
-                    end
-                    SaveCurrentConfig()
-                end
-            end
+        resetShortcutsBtn.MouseButton1Click:Connect(function()
+            ClearAllBindings()
+            shortcutStatus.Text = "Atalhos redefinidos."
+            shortcutStatus.TextColor3 = Colors.Warning
+            task.delay(2, function() shortcutStatus.Text = "" end)
         end)
 
         -- SETTINGS TAB
         local st = TabContents["Settings"]
-        local saveB = Instance.new("TextButton")
-        saveB.Size = UDim2.new(1, 0, 0, 40)
-        saveB.BackgroundColor3 = Colors.Accent
-        saveB.BorderSizePixel = 0
-        saveB.Text = "SALVAR CONFIGURAÇÃO"
-        saveB.TextColor3 = Colors.Text
-        saveB.TextSize = 14
-        saveB.Font = Enum.Font.GothamBold
-        saveB.Parent = st
-        CreateCorner(saveB, UDim.new(0, 6))
-        saveB.MouseButton1Click:Connect(function()
-            SaveCurrentConfig()
-            saveB.Text = "SALVO!"
-            task.wait(1)
-            saveB.Text = "SALVAR CONFIGURAÇÃO"
-        end)
+        local stHint = Instance.new("TextLabel")
+        stHint.Size = UDim2.new(1, 0, 0, 40)
+        stHint.BackgroundTransparency = 1
+        stHint.Text = "Gerencie o save do hub. O Insert esconde a interface."
+        stHint.TextColor3 = Colors.Text
+        stHint.TextSize = 11
+        stHint.TextWrapped = true
+        stHint.Font = Enum.Font.Gotham
+        stHint.Parent = st
 
-        local resetB = Instance.new("TextButton")
-        resetB.Size = UDim2.new(1, 0, 0, 40)
-        resetB.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
-        resetB.BorderSizePixel = 0
-        resetB.Text = "RESETAR CONFIGURAÇÃO"
-        resetB.TextColor3 = Colors.Text
-        resetB.TextSize = 14
-        resetB.Font = Enum.Font.GothamBold
-        resetB.Parent = st
-        CreateCorner(resetB, UDim.new(0, 6))
-        resetB.MouseButton1Click:Connect(function()
+        local resetBtn = Instance.new("TextButton")
+        resetBtn.Size = UDim2.new(1, 0, 0, 40)
+        resetBtn.BackgroundColor3 = Colors.Accent
+        resetBtn.BorderSizePixel = 0
+        resetBtn.Text = "RESETAR CONFIGURAÇÕES"
+        resetBtn.TextColor3 = Colors.Text
+        resetBtn.TextSize = 13
+        resetBtn.Font = Enum.Font.GothamBold
+        resetBtn.Parent = st
+        CreateCorner(resetBtn, UDim.new(0, 6))
+        resetBtn.MouseButton1Click:Connect(function()
             SaveSystem:Reset()
-            resetB.Text = "RESETADO (reabra o script)"
-            task.wait(1.5)
-            resetB.Text = "RESETAR CONFIGURAÇÃO"
+            resetBtn.Text = "RESETADO! REABRA O HUB"
+            resetBtn.BackgroundColor3 = Colors.Success
+            task.delay(2, function() resetBtn.Text = "RESETAR CONFIGURAÇÕES"; resetBtn.BackgroundColor3 = Colors.Accent end)
         end)
 
-        local credits = Instance.new("TextLabel")
-        credits.Size = UDim2.new(1, 0, 0, 60)
-        credits.BackgroundTransparency = 1
-        credits.Text = "MOKURO HUB"
-        credits.TextColor3 = Colors.TextDark
-        credits.TextSize = 11
-        credits.Font = Enum.Font.Gotham
-        credits.TextWrapped = true
-        credits.Parent = st
+        -- INITIALIZATION
+        SetupInsertMinimize()
 
-        -- DRAG DO CÍRCULO FOV
-        local draggingFOV = false
-        local dragOffsetFOV = Vector2.new(0, 0)
+        pcall(function()
+            FOV_Circle = Drawing.new("Circle")
+            FOV_Circle.Visible = false
+            FOV_Circle.Thickness = 2
+        end)
+        pcall(function()
+            FOV_Rect = Drawing.new("Square")
+            FOV_Rect.Visible = false
+            FOV_Rect.Filled = false
+        end)
 
+        for _, p in ipairs(Players:GetPlayers()) do CreateESP(p) end
+        Players.PlayerAdded:Connect(CreateESP)
+        Players.PlayerRemoving:Connect(RemoveESP)
+
+        Connection = RunService.RenderStepped:Connect(function()
+            pcall(ApplyAimAssist)
+            pcall(UpdateESP)
+            pcall(UpdateMovement)
+        end)
+
+        -- Mouse inputs: SOMENTE Mouse1 para AimAssist
         UserInputService.InputBegan:Connect(function(input, gp)
             if gp then return end
-            if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
-            if not (AimAssist.Enabled or AimAssist.AlwaysOn) then return end
-            local mp = UserInputService:GetMouseLocation()
-            local ref = GetAimReferencePoint()
-            local radius = (AimAssist.PriorityMode == "Distance") and AimAssist.MaxFOVForDistance or AimAssist.FOV
-            local dist = (mp - ref).Magnitude
-            if math.abs(dist - radius) < 18 then
-                draggingFOV = true
-                dragOffsetFOV = ref - mp
-                AimAssist.CustomAimPos = ref
-                AimAssist.CustomAimActive = true
-            end
-        end)
-
-        UserInputService.InputChanged:Connect(function(input)
-            if not draggingFOV then return end
-            if input.UserInputType ~= Enum.UserInputType.MouseMovement then return end
-            local mp = UserInputService:GetMouseLocation()
-            AimAssist.CustomAimPos = mp + dragOffsetFOV
-        end)
-
-        UserInputService.InputEnded:Connect(function(input)
             if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                draggingFOV = false
-                if AimAssist.CustomAimActive then SaveCurrentConfig() end
+                IsShooting = true
+                LastClickTime = tick()
+            end
+        end)
+        UserInputService.InputEnded:Connect(function(input, gp)
+            if gp then return end
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                IsShooting = false
             end
         end)
 
-        print("[Mokuro Hub] Interface criada com sucesso")
+        if Movement.Enabled then
+            task.spawn(function()
+                LocalPlayer.CharacterAdded:Wait()
+                SetupMovement()
+            end)
+        end
     end)
 
     if not success then
         warn("[Mokuro Hub] Erro ao criar interface: " .. tostring(err))
+        Env.ESPMokuroRunning = nil
     end
 end
 
--- ==================== SETUP INPUT (MOUSE1 ATIVA AIM) ====================
-local function SetupInput()
-    UserInputService.InputBegan:Connect(function(input, gp)
-        if gp then return end
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            IsShooting = true
-            LastClickTime = tick()
-        end
-        if input.UserInputType == Enum.UserInputType.Keyboard then
-            if input.KeyCode == Enum.KeyCode.Space and Movement.InfiniteJump and Movement.Enabled then
-                local char = LocalPlayer.Character
-                local hum = char and char:FindFirstChildOfClass("Humanoid")
-                if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
-            end
-        end
-    end)
-
-    UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            -- Desliga imediatamente ao soltar o botão, inclusive em cliques rápidos
-            IsShooting = false
-        end
-    end)
-
-    -- Evita que o estado de disparo fique preso ao perder o foco da janela
-    UserInputService.WindowFocusReleased:Connect(function()
-        IsShooting = false
-    end)
-end
-
--- ==================== LOOP PRINCIPAL ====================
-local function StartMainLoop()
-    Connection = RunService.RenderStepped:Connect(function()
-        pcall(ApplyAimAssist)
-        pcall(UpdateESP)
-        pcall(UpdateMovement)
-    end)
-end
-
--- ==================== INICIALIZAÇÃO ====================
-local function Init()
-    FOV_Circle = Drawing.new("Circle")
-    FOV_Circle.Visible = false
-    FOV_Circle.Color = Colors.Accent
-    FOV_Circle.Thickness = 1.5
-    FOV_Circle.Radius = AimAssist.FOV
-    FOV_Circle.NumSides = 60
-    FOV_Circle.Filled = false
-    FOV_Circle.Transparency = 1
-
-    SetupInsertMinimize()
-    SetupInput()
-    CreateInterface()
-    StartMainLoop()
-
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer then CreateESP(player) end
-    end
-
-    Players.PlayerAdded:Connect(function(player)
-        player.CharacterAdded:Connect(function()
-            task.wait(1)
-            if player ~= LocalPlayer then CreateESP(player) end
-        end)
-    end)
-
-    Players.PlayerRemoving:Connect(function(player)
-        RemoveESP(player)
-    end)
-
-    LocalPlayer.CharacterAdded:Connect(function(char)
-        task.wait(1)
-        if Performance.NoAttackAnimEnabled then
-            pcall(SetupAttackAnimHook)
-        end
-        if Movement.Enabled then
-            pcall(SetupMovement)
-        end
-        if Movement.DashEnabled then
-            ToggleDash(true)
-        end
-    end)
-
-    if Performance.NoAttackAnimEnabled then
-        pcall(SetupAttackAnimHook)
-    end
-    if Movement.DashEnabled then
-        pcall(ToggleDash, true)
-    end
-
-    print("[Mokuro Hub] v5.3 carregado com sucesso!")
-end
-
-Init()
+CreateInterface()
+print("[Mokuro Hub] Iniciado com sucesso.")
