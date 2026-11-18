@@ -1,5 +1,5 @@
 -- MOKURO HUB
--- ESP, Aim Assist, Teleport, Movement, Skills NC, Dash, Atalhos, Performance
+-- ESP, Aim Assist, Teleport, Movement, Skills NC, Dash, Atalhos, Performance, Desempenho (Fog)
 -- FOV retangular + proporções + personalizado | Mouse1-only aim
 
 local Env = (getgenv and getgenv()) or _G
@@ -39,7 +39,7 @@ print("[Mokuro Hub] Serviços carregados")
 
 -- ==================== SAVE SYSTEM ====================
 local SaveSystem = {
-    ConfigName = "MokuroHub_Config_v54",
+    ConfigName = "MokuroHub_Config_v55",
     DefaultConfig = {
         AimAssist_Enabled = false,
         AimAssist_AlwaysOn = false,
@@ -96,6 +96,8 @@ local SaveSystem = {
         Performance_InstantSkill = false,
         Performance_NoAnim = false,
         Performance_AntiCam = false,
+        Performance_FogDisabled = false,
+        Performance_GraphicsMode = false,
     }
 }
 
@@ -177,9 +179,6 @@ local AimAssist = {
 }
 
 -- ==================== FOV GEOMETRY ====================
--- O FOV é a "área de mira". Em modo Círculo: raio = FOV.
--- Em modo Retângulo: largura = FOV, altura = FOV * (H/W) da proporção escolhida.
--- O centro é sempre o ponto de referência da mira.
 local FOVGeometry = {}
 
 function FOVGeometry:GetAspectRatio()
@@ -195,7 +194,6 @@ function FOVGeometry:GetAspectRatio()
     return h / w
 end
 
--- Retorna largura, altura e se é retângulo
 function FOVGeometry:GetSize(radius)
     if AimAssist.FOVShape == "Circulo" then
         return radius * 2, radius * 2, false
@@ -205,7 +203,6 @@ function FOVGeometry:GetSize(radius)
     return hw * 2, hh * 2, true
 end
 
--- Checa se um ponto (screenX, screenY) cai dentro da área de mira
 function FOVGeometry:Contains(center, screenX, screenY, radius)
     local dx = screenX - center.X
     local dy = screenY - center.Y
@@ -217,7 +214,6 @@ function FOVGeometry:Contains(center, screenX, screenY, radius)
     return math.abs(dx) <= hw and math.abs(dy) <= hh
 end
 
--- Retorna a "distância normalizada" 0..1 (fração da borda) para prioridade
 function FOVGeometry:NormalizedDistance(center, screenX, screenY, radius)
     local dx = screenX - center.X
     local dy = screenY - center.Y
@@ -261,6 +257,134 @@ local Performance = {
     AntiCamActive = SavedConfig.Performance_AntiCam or false,
     CleanLoopThread = nil,
 }
+
+-- ==================== DESEMPENHO (FOG 100%) ====================
+local Desempenho = {
+    FogDisabled = SavedConfig.Performance_FogDisabled or false,
+    OriginalFogEnd = Lighting.FogEnd,
+    OriginalFogStart = Lighting.FogStart,
+    OriginalFogColor = Lighting.FogColor,
+    OriginalAtmospheres = {},
+    GraphicsMode = SavedConfig.Performance_GraphicsMode or false,
+    OriginalGlobalShadows = Lighting.GlobalShadows,
+    OriginalTerrainDecoration = nil,
+    OriginalPostEffects = {},
+}
+
+local function SaveAtmosphere(atmosphere)
+    if not Desempenho.OriginalAtmospheres[atmosphere] then
+        Desempenho.OriginalAtmospheres[atmosphere] = {
+            Density = atmosphere.Density,
+            Haze = atmosphere.Haze,
+            Glare = atmosphere.Glare,
+            Color = atmosphere.Color,
+            Decay = atmosphere.Decay,
+            Offset = atmosphere.Offset,
+        }
+    end
+end
+
+local function ApplyFog(disabled)
+    Desempenho.FogDisabled = disabled
+
+    if disabled then
+        -- Neblina clássica
+        Lighting.FogStart = 0
+        Lighting.FogEnd = 1000000
+
+        -- Neblina criada por Atmosphere
+        for _, obj in ipairs(Lighting:GetDescendants()) do
+            if obj:IsA("Atmosphere") then
+                SaveAtmosphere(obj)
+                obj.Density = 0
+                obj.Haze = 0
+                obj.Glare = 0
+            end
+        end
+    else
+        -- Restaurar neblina clássica
+        Lighting.FogStart = Desempenho.OriginalFogStart
+        Lighting.FogEnd = Desempenho.OriginalFogEnd
+        Lighting.FogColor = Desempenho.OriginalFogColor
+
+        -- Restaurar Atmospheres que foram alterados
+        for atmosphere, original in pairs(Desempenho.OriginalAtmospheres) do
+            if atmosphere and atmosphere.Parent then
+                atmosphere.Density = original.Density
+                atmosphere.Haze = original.Haze
+                atmosphere.Glare = original.Glare
+                atmosphere.Color = original.Color
+                atmosphere.Decay = original.Decay
+                atmosphere.Offset = original.Offset
+            end
+        end
+    end
+end
+
+-- Aplicar também a Atmosphere que o jogo adicionar depois
+Lighting.DescendantAdded:Connect(function(obj)
+    if obj:IsA("Atmosphere") and Desempenho.FogDisabled then
+        SaveAtmosphere(obj)
+        obj.Density = 0
+        obj.Haze = 0
+        obj.Glare = 0
+    end
+end)
+
+if Desempenho.FogDisabled then
+    task.defer(function() ApplyFog(true) end)
+end
+
+-- ==================== MODO GRAFICOS LOCAL ====================
+local function SavePostEffect(effect)
+    if not Desempenho.OriginalPostEffects[effect] then
+        local ok, enabled = pcall(function() return effect.Enabled end)
+        if ok then Desempenho.OriginalPostEffects[effect] = enabled end
+    end
+end
+
+local function ApplyGraphicsMode(enabled)
+    Desempenho.GraphicsMode = enabled
+
+    if Desempenho.OriginalTerrainDecoration == nil then
+        pcall(function()
+            Desempenho.OriginalTerrainDecoration = Workspace.Terrain.Decoration
+        end)
+    end
+
+    if enabled then
+        pcall(function() Lighting.GlobalShadows = false end)
+        pcall(function() Workspace.Terrain.Decoration = false end)
+        for _, obj in ipairs(Lighting:GetDescendants()) do
+            if obj:IsA("PostEffect") then
+                SavePostEffect(obj)
+                pcall(function() obj.Enabled = false end)
+            end
+        end
+    else
+        pcall(function() Lighting.GlobalShadows = Desempenho.OriginalGlobalShadows end)
+        if Desempenho.OriginalTerrainDecoration ~= nil then
+            pcall(function() Workspace.Terrain.Decoration = Desempenho.OriginalTerrainDecoration end)
+        end
+        for effect, wasEnabled in pairs(Desempenho.OriginalPostEffects) do
+            if effect and effect.Parent then
+                pcall(function() effect.Enabled = wasEnabled end)
+            end
+        end
+    end
+end
+
+-- Também aplica o modo a efeitos visuais adicionados posteriormente.
+Lighting.DescendantAdded:Connect(function(obj)
+    if Desempenho.GraphicsMode and obj:IsA("PostEffect") then
+        SavePostEffect(obj)
+        pcall(function() obj.Enabled = false end)
+    end
+end)
+
+if Desempenho.GraphicsMode then
+    task.defer(function() ApplyGraphicsMode(true) end)
+end
 
 -- ==================== SKILL KEYS PARSER ====================
 local DigitMap = {
@@ -453,6 +577,8 @@ local function SaveCurrentConfig()
         Performance_InstantSkill = Performance.InstantSkillActive,
         Performance_NoAnim = Performance.NoAnimActive,
         Performance_AntiCam = Performance.AntiCamActive,
+        Performance_FogDisabled = Desempenho.FogDisabled,
+        Performance_GraphicsMode = Desempenho.GraphicsMode,
     }
     SaveSystem:Save(config)
 end
@@ -548,7 +674,6 @@ local function GetAimReferencePoint()
     return Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
 end
 
--- Calcula "score" para prioridade FOV — agora usando geometria retangular ou circular
 local function FOVScore(screenX, screenY)
     local center = GetAimReferencePoint()
     local radius = (AimAssist.PriorityMode == "Distance") and AimAssist.MaxFOVForDistance or AimAssist.FOV
@@ -755,8 +880,6 @@ local function ApplyAimAssist()
 end
 
 -- ==================== FOV DRAW ====================
--- Desenha círculo OU retângulo. O retângulo é "expandido" a partir do centro,
--- com largura = 2*FOV e altura = 2*FOV*(H/W).
 local function UpdateFOVDrawing()
     local center = GetAimReferencePoint()
     local radius = (AimAssist.PriorityMode == "Distance") and AimAssist.MaxFOVForDistance or AimAssist.FOV
@@ -1145,7 +1268,7 @@ local function CreateInterface()
         ContentArea.BorderSizePixel = 0
         ContentArea.Parent = MainFrame
 
-        local Tabs = {"Aim Assist", "ESP", "Movement", "Teleport", "Skills", "Performance", "Atalhos", "Settings"}
+        local Tabs = {"Aim Assist", "ESP", "Movement", "Teleport", "Skills", "Performance", "Desempenho", "Atalhos", "Settings"}
         local TabLabels = {
             ["Aim Assist"] = "Auxílio de mira",
             ["ESP"] = "ESP",
@@ -1153,6 +1276,7 @@ local function CreateInterface()
             ["Teleport"] = "Teleporte",
             ["Skills"] = "Skills",
             ["Performance"] = "Performance",
+            ["Desempenho"] = "Desempenho",
             ["Atalhos"] = "Atalhos",
             ["Settings"] = "Configurações"
         }
@@ -1249,7 +1373,8 @@ local function CreateInterface()
             ["No Cooldown (spam de skills)"] = "Reenvia as teclas das skills em alta frequência.",
             ["Intervalo do No Cooldown"] = "Tempo entre cada ciclo do loop.",
             ["Anti-Lag (reduz gráficos)"] = "Reduz sombras, partículas e qualidade.",
-            ["Remover animação de ataque"] = "Bloqueia animações de ataque."
+            ["Remover animação de ataque"] = "Bloqueia animações de ataque.",
+            ["Desativar Fog"] = "Remove o fog da iluminação (Lighting.FogEnd/FogStart).",
         }
 
         local function InfoBtn(parent, desc, xo)
@@ -1546,23 +1671,19 @@ local function CreateInterface()
         CreateDropdown(aim, "Selecionar jogador específico", po, "Automático", function(v) AimAssist.SelectedPlayerName = v; LockedTarget = nil end)
         CreateDropdown(aim, "Parte principal do alvo", {"Head", "Torso", "HumanoidRootPart", "LeftArm", "RightArm", "LeftLeg", "RightLeg"}, AimAssist.TargetPart, function(v) AimAssist.TargetPart = v end, "AimAssist_TargetPart")
 
-        -- Forma do FOV
         CreateDropdown(aim, "Forma do FOV", {"Circulo", "Retangulo"}, AimAssist.FOVShape, function(v)
             AimAssist.FOVShape = v
         end, "AimAssist_FOVShape")
 
-        -- Proporção
         CreateDropdown(aim, "Proporção do FOV", {
             "16:9", "16:10", "4:3", "3:2", "21:9", "1:1", "9:16", "3:4", "Personalizado"
         }, AimAssist.FOVAspect, function(v)
             AimAssist.FOVAspect = v
         end, "AimAssist_FOVAspect")
 
-        -- Largura / Altura personalizadas
         CreateSlider(aim, "Largura personalizada", 100, 3840, math.clamp(AimAssist.FOVCustomW, 100, 3840), function(v)
             AimAssist.FOVCustomW = v
             if AimAssist.FOVAspect == "Personalizado" then
-                -- recalcula FOV baseado na largura (opcional: mantém FOV como largura/2)
                 AimAssist.FOV = math.floor(v / 2)
             end
         end, "AimAssist_FOVCustomW")
@@ -2258,6 +2379,51 @@ local function CreateInterface()
 
         RefreshPerfStatus()
 
+        -- DESEMPENHO TAB (Fog)
+        local des = TabContents["Desempenho"]
+
+        local desHint = Instance.new("TextLabel")
+        desHint.Size = UDim2.new(1, 0, 0, 60)
+        desHint.BackgroundTransparency = 1
+        desHint.Text = "Ajustes visuais locais: remover neblina e reduzir efeitos/sombras para aliviar o processamento. Isso não força o carregamento de partes distantes do mapa; a distância de streaming depende das configurações do jogo no Studio."
+        desHint.TextColor3 = Colors.TextDark
+        desHint.TextSize = 11
+        desHint.TextWrapped = true
+        desHint.Font = Enum.Font.Gotham
+        desHint.Parent = des
+
+        local desStatus = Instance.new("TextLabel")
+        desStatus.Size = UDim2.new(1, 0, 0, 26)
+        desStatus.BackgroundTransparency = 1
+        desStatus.Text = "Status: fog ativo"
+        desStatus.TextColor3 = Colors.TextDark
+        desStatus.TextSize = 12
+        desStatus.Font = Enum.Font.GothamSemibold
+        desStatus.TextXAlignment = Enum.TextXAlignment.Left
+        desStatus.Parent = des
+
+        local function RefreshDesStatus()
+            if Desempenho.FogDisabled then
+                desStatus.Text = "Status: fog desativado"
+                desStatus.TextColor3 = Colors.Success
+            else
+                desStatus.Text = "Status: fog ativo"
+                desStatus.TextColor3 = Colors.TextDark
+            end
+        end
+
+        CreateToggle(des, "Desativar Fog", Desempenho.FogDisabled, function(s)
+            Desempenho.FogDisabled = s
+            ApplyFog(s)
+            RefreshDesStatus()
+        end, "Performance_FogDisabled")
+
+        CreateToggle(des, "Modo gráficos leve (menos efeitos e sombras)", Desempenho.GraphicsMode, function(s)
+            ApplyGraphicsMode(s)
+        end, "Performance_GraphicsMode")
+
+        RefreshDesStatus()
+
         -- ATALHOS TAB
         local at = TabContents["Atalhos"]
         local hint = Instance.new("TextLabel")
@@ -2358,7 +2524,6 @@ local function CreateInterface()
             pcall(UpdateMovement)
         end)
 
-        -- Mouse inputs: SOMENTE Mouse1 para AimAssist
         UserInputService.InputBegan:Connect(function(input, gp)
             if gp then return end
             if input.UserInputType == Enum.UserInputType.MouseButton1 then
