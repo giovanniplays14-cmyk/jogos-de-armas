@@ -1,422 +1,775 @@
--- BLOX FRUITS ESP + AIMBOT COMPLETO (PARA TESTE NO SEU JOGO)
--- Funcionalidades: ESP Completo + Aimbot com FOV, Suavidade, Tecla e Alvo
+-- language: Lua, file: HubCore.lua, target: Roblox (executor ou LocalScript)
+-- Arquitetura modular: cada aba é um módulo registrado no Hub.
 
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-local SoundService = game:GetService("SoundService")
-local LocalPlayer = Players.LocalPlayer
-local Camera = workspace.CurrentCamera
-
--- FORÇAR ÁUDIO (apenas se precisar no seu jogo)
-task.spawn(function()
-    while task.wait(10) do
-        pcall(function() SoundService.AudioContext = "Default" end)
-    end
-end)
-
--- =============================================
--- CONFIGURAÇÕES GERAIS
--- =============================================
-local Settings = {
-    -- ESP
-    Enabled = true,
-    ShowBox = true,
-    ShowTracer = true,
-    ShowName = true,
-    ShowHighlight = true,
-    MaxDistance = 500,
-    TeamCheck = false, -- desligue pra ver TODOS no seu jogo
-    BoxColor = Color3.fromRGB(255, 0, 0),
-    TracerColor = Color3.fromRGB(255, 255, 255),
-    Thickness = 2,
-
-    -- === AIMBOT ===
-    AimEnabled = true,
-    AimKey = Enum.KeyCode.E, -- Tecla para ativar a mira
-    FOV = 150, -- Campo de visão (quanto maior, mais longe pega)
-    Smoothness = 8, -- Suavidade: maior = mais devagar / mais natural
-    AimPart = "Head", -- Posição da mira: "Head" ou "HumanoidRootPart"
-    AimDistance = 400, -- Distância máxima pra travar
-    ShowFOVCircle = true -- Mostrar círculo do FOV na tela
+local Services = {
+    Players = game:GetService("Players"),
+    RunService = game:GetService("RunService"),
+    UserInputService = game:GetService("UserInputService"),
+    TweenService = game:GetService("TweenService"),
+    HttpService = game:GetService("HttpService"),
 }
 
-local ESPObjects = {}
-local AimbotActive = false
-local FOVCircle = nil
+local LocalPlayer = Services.Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
--- =============================================
--- FUNÇÃO DE INIMIGO
--- =============================================
-local function IsEnemy(Target)
-    if not Settings.TeamCheck then return true end
-    if not Target or not Target:IsA("Model") then return false end
-    local Humanoid = Target:FindFirstChild("Humanoid")
-    if not Humanoid or Humanoid.Health <= 0 then return false end
-    local PlayerCheck = Players:GetPlayerFromCharacter(Target)
-    if PlayerCheck then
-        return PlayerCheck ~= LocalPlayer and PlayerCheck.Team ~= LocalPlayer.Team
-    end
-    return true
+-- ============================================================
+-- CONFIG / PERSISTÊNCIA
+-- ============================================================
+local Store = {}
+Store.__index = Store
+
+function Store.new(filename)
+    local self = setmetatable({}, Store)
+    self.filename = filename or "hub_config.json"
+    self.data = {}
+    self:_load()
+    return self
 end
 
--- =============================================
--- DESENHAR CÍRCULO DE FOV
--- =============================================
-local function CreateFOVCircle()
-    FOVCircle = Drawing.new("Circle")
-    FOVCircle.Radius = Settings.FOV
-    FOVCircle.Thickness = 1
-    FOVCircle.Filled = false
-    FOVCircle.NumSides = 64
-    FOVCircle.Color = Color3.fromRGB(255, 255, 255)
-    FOVCircle.Transparency = 1
-    FOVCircle.Visible = Settings.ShowFOVCircle
-end
-
--- =============================================
--- SISTEMA DE AIMBOT
--- =============================================
-local function GetClosestAimTarget()
-    local BestTarget = nil
-    local BestAngle = math.huge
-    local LocalChar = LocalPlayer.Character
-    if not LocalChar then return nil end
-    local Root = LocalChar:FindFirstChild("HumanoidRootPart")
-    local Head = LocalChar:FindFirstChild("Head")
-    if not Root or not Head then return nil end
-
-    local CameraCF = Camera.CFrame
-    local ScreenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-
-    for _, Player in ipairs(Players:GetPlayers()) do
-        if Player ~= LocalPlayer and Player.Character then
-            local Char = Player.Character
-            local Hum = Char:FindFirstChild("Humanoid")
-            local Part = Char:FindFirstChild(Settings.AimPart)
-            local OtherRoot = Char:FindFirstChild("HumanoidRootPart")
-            if Hum and Hum.Health > 0 and Part and OtherRoot and IsEnemy(Char) then
-                local Dist = (Root.Position - OtherRoot.Position).Magnitude
-                if Dist <= Settings.AimDistance then
-                    local Pos, OnScreen = Camera:WorldToViewportPoint(Part.Position)
-                    if OnScreen then
-                        local Vec2 = Vector2.new(Pos.X, Pos.Y)
-                        local Angle = (Vec2 - ScreenCenter).Magnitude
-                        if Angle < Settings.FOV and Angle < BestAngle then
-                            BestAngle = Angle
-                            BestTarget = Part
-                        end
-                    end
-                end
-            end
+function Store:_load()
+    local ok, raw = pcall(function()
+        if isfile and isfile(self.filename) then
+            return readfile(self.filename)
         end
-    end
-    return BestTarget
-end
-
-local function AimAt(TargetPart)
-    if not TargetPart then return end
-    local CamPos = Camera.CFrame.Position
-    local Direction = (TargetPart.Position - CamPos).Unit
-    local NewCF = CFrame.new(CamPos, CamPos + Direction)
-    Camera.CFrame = Camera.CFrame:Lerp(NewCF, 1 / Settings.Smoothness)
-end
-
--- =============================================
--- MENU GUI
--- =============================================
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "ESP_Aimbot_Menu"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
-
-local Frame = Instance.new("Frame")
-Frame.Size = UDim2.new(0, 220, 0, 320)
-Frame.Position = UDim2.new(0, 10, 0, 10)
-Frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-Frame.BackgroundTransparency = 0.1
-Frame.BorderSizePixel = 0
-Frame.Active = true
-Frame.Draggable = true
-Frame.Parent = ScreenGui
-
-local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, 0, 0, 30)
-Title.Text = "ESP + AIMBOT"
-Title.TextColor3 = Color3.fromRGB(255, 255, 255)
-Title.BackgroundTransparency = 1
-Title.Font = Enum.Font.GothamBold
-Title.TextSize = 14
-Title.Parent = Frame
-
--- Botão ESP
-local ToggleBtn = Instance.new("TextButton")
-ToggleBtn.Size = UDim2.new(1, -10, 0, 30)
-ToggleBtn.Position = UDim2.new(0, 5, 0, 35)
-ToggleBtn.Text = "ESP: ON"
-ToggleBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
-ToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-ToggleBtn.Font = Enum.Font.Gotham
-ToggleBtn.TextSize = 12
-ToggleBtn.Parent = Frame
-
--- FOV
-local FOVLabel = Instance.new("TextLabel")
-FOVLabel.Size = UDim2.new(1, -10, 0, 20)
-FOVLabel.Position = UDim2.new(0, 5, 0, 75)
-FOVLabel.Text = "FOV: 150"
-FOVLabel.TextXAlignment = Enum.TextXAlignment.Left
-FOVLabel.BackgroundTransparency = 1
-FOVLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-FOVLabel.TextSize = 12
-FOVLabel.Parent = Frame
-
-local FOVBox = Instance.new("TextBox")
-FOVBox.Size = UDim2.new(1, -10, 0, 25)
-FOVBox.Position = UDim2.new(0, 5, 0, 98)
-FOVBox.Text = "150"
-FOVBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-FOVBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-FOVBox.Font = Enum.Font.Gotham
-FOVBox.TextSize = 12
-FOVBox.Parent = Frame
-
-FOVBox.FocusLost:Connect(function()
-    local val = tonumber(FOVBox.Text)
-    if val and val > 0 then
-        Settings.FOV = math.clamp(val, 10, 500)
-        FOVLabel.Text = "FOV: " .. Settings.FOV
-        if FOVCircle then FOVCircle.Radius = Settings.FOV end
-    end
-end)
-
--- Suavidade
-local SmoothLabel = Instance.new("TextLabel")
-SmoothLabel.Size = UDim2.new(1, -10, 0, 20)
-SmoothLabel.Position = UDim2.new(0, 5, 0, 130)
-SmoothLabel.Text = "Suavidade: 8"
-SmoothLabel.TextXAlignment = Enum.TextXAlignment.Left
-SmoothLabel.BackgroundTransparency = 1
-SmoothLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-SmoothLabel.TextSize = 12
-SmoothLabel.Parent = Frame
-
-local SmoothBox = Instance.new("TextBox")
-SmoothBox.Size = UDim2.new(1, -10, 0, 25)
-SmoothBox.Position = UDim2.new(0, 5, 0, 153)
-SmoothBox.Text = "8"
-SmoothBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-SmoothBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-SmoothBox.Font = Enum.Font.Gotham
-SmoothBox.TextSize = 12
-SmoothBox.Parent = Frame
-
-SmoothBox.FocusLost:Connect(function()
-    local val = tonumber(SmoothBox.Text)
-    if val and val > 0 then
-        Settings.Smoothness = math.clamp(val, 1, 50)
-        SmoothLabel.Text = "Suavidade: " .. Settings.Smoothness
-    end
-end)
-
--- Tecla do Aimbot
-local KeyLabel = Instance.new("TextLabel")
-KeyLabel.Size = UDim2.new(1, -10, 0, 20)
-KeyLabel.Position = UDim2.new(0, 5, 0, 185)
-KeyLabel.Text = "Tecla Mira: E"
-KeyLabel.TextXAlignment = Enum.TextXAlignment.Left
-KeyLabel.BackgroundTransparency = 1
-KeyLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-KeyLabel.TextSize = 12
-KeyLabel.Parent = Frame
-
-local InfoLabel = Instance.new("TextLabel")
-InfoLabel.Size = UDim2.new(1, -10, 0, 40)
-InfoLabel.Position = UDim2.new(0, 5, 0, 220)
-InfoLabel.Text = "Segure E para mirar\nAjuste FOV e Suavidade acima"
-InfoLabel.TextXAlignment = Enum.TextXAlignment.Left
-InfoLabel.BackgroundTransparency = 1
-InfoLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-InfoLabel.TextSize = 11
-InfoLabel.Font = Enum.Font.Gotham
-InfoLabel.Parent = Frame
-
--- =============================================
--- FUNÇÕES DE ESP
--- =============================================
-local function AddESP(Target)
-    if ESPObjects[Target] then return end
-    local Hum = Target:FindFirstChild("Humanoid")
-    if not Hum or Hum.Health <= 0 then return end
-    local Root = Target:FindFirstChild("HumanoidRootPart") or Target:FindFirstChild("Head")
-    if not Root then return end
-
-    local Highlight = Instance.new("Highlight")
-    Highlight.Adornee = Target
-    Highlight.FillColor = Settings.BoxColor
-    Highlight.FillTransparency = 0.7
-    Highlight.OutlineColor = Settings.BoxColor
-    Highlight.OutlineTransparency = 0
-    Highlight.Enabled = Settings.ShowHighlight
-    Highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-    Highlight.Parent = Target
-
-    local Billboard = Instance.new("BillboardGui")
-    Billboard.Adornee = Root
-    Billboard.Size = UDim2.new(0, 100, 0, 20)
-    Billboard.StudsOffset = Vector3.new(0, 2.5, 0)
-    Billboard.AlwaysOnTop = true
-    local NameLabel = Instance.new("TextLabel")
-    NameLabel.Size = UDim2.new(1, 0, 1, 0)
-    NameLabel.BackgroundTransparency = 1
-    NameLabel.Text = Target.Name
-    NameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-    NameLabel.TextStrokeTransparency = 0
-    NameLabel.Font = Enum.Font.GothamBold
-    NameLabel.TextSize = 14
-    NameLabel.Parent = Billboard
-    Billboard.Parent = Target
-
-    local Box = Drawing.new("Square")
-    Box.Visible = false
-    Box.Color = Settings.BoxColor
-    Box.Thickness = Settings.Thickness
-    Box.Filled = false
-
-    local Tracer = Drawing.new("Line")
-    Tracer.Visible = false
-    Tracer.Color = Settings.TracerColor
-    Tracer.Thickness = Settings.Thickness
-
-    ESPObjects[Target] = {
-        Highlight = Highlight, Billboard = Billboard, NameLabel = NameLabel,
-        Box = Box, Tracer = Tracer, RootPart = Root, Target = Target
-    }
-end
-
-local function RemoveESP(Target)
-    local Obj = ESPObjects[Target]
-    if Obj then
-        if Obj.Highlight then Obj.Highlight:Destroy() end
-        if Obj.Billboard then Obj.Billboard:Destroy() end
-        if Obj.Box then Obj.Box:Remove() end
-        if Obj.Tracer then Obj.Tracer:Remove() end
-        ESPObjects[Target] = nil
+        return nil
+    end)
+    if ok and raw and #raw > 0 then
+        local decoded = pcall(function()
+            return Services.HttpService:JSONDecode(raw)
+        end)
+        if decoded then
+            self.data = Services.HttpService:JSONDecode(raw)
+        end
     end
 end
 
--- =============================================
--- DETECÇÃO DE TECLA
--- =============================================
-UserInputService.InputBegan:Connect(function(Input, P)
-    if P then return end
-    if Input.KeyCode == Settings.AimKey then
-        AimbotActive = true
+function Store:get(key, default)
+    if self.data[key] == nil then return default end
+    return self.data[key]
+end
+
+function Store:set(key, value)
+    self.data[key] = value
+    self:_save()
+end
+
+function Store:_save()
+    pcall(function()
+        if writefile then
+            writefile(self.filename, Services.HttpService:JSONEncode(self.data))
+        end
+    end)
+end
+
+function Store:reset()
+    self.data = {}
+    pcall(function()
+        if delfile and isfile and isfile(self.filename) then
+            delfile(self.filename)
+        end
+    end)
+end
+
+-- ============================================================
+-- TEMA
+-- ============================================================
+local Theme = {
+    bg        = Color3.fromRGB(18, 18, 22),
+    sidebar   = Color3.fromRGB(12, 12, 15),
+    panel     = Color3.fromRGB(26, 26, 32),
+    element   = Color3.fromRGB(34, 34, 42),
+    hover     = Color3.fromRGB(46, 46, 56),
+    accent    = Color3.fromRGB(90, 130, 255),
+    accentDim = Color3.fromRGB(60, 90, 190),
+    text      = Color3.fromRGB(235, 235, 240),
+    textDim   = Color3.fromRGB(150, 150, 165),
+    danger    = Color3.fromRGB(200, 60, 70),
+    success   = Color3.fromRGB(70, 190, 110),
+    border    = Color3.fromRGB(45, 45, 55),
+    radius    = UDim.new(0, 8),
+}
+
+-- ============================================================
+-- HELPERS DE UI
+-- ============================================================
+local function corner(parent, radius)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = radius or Theme.radius
+    c.Parent = parent
+    return c
+end
+
+local function stroke(parent, color, thickness)
+    local s = Instance.new("UIStroke")
+    s.Color = color or Theme.border
+    s.Thickness = thickness or 1
+    s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    s.Parent = parent
+    return s
+end
+
+local function new(class, props, parent)
+    local inst = Instance.new(class)
+    for k, v in pairs(props or {}) do
+        if k ~= "Parent" then
+            inst[k] = v
+        end
+    end
+    inst.Parent = parent
+    return inst
+end
+
+-- ============================================================
+-- HUB (container raiz)
+-- ============================================================
+local Hub = {}
+Hub.__index = Hub
+
+function Hub.new(opts)
+    opts = opts or {}
+    local self = setmetatable({}, Hub)
+    self.title = opts.title or "Hub"
+    self.store = Store.new(opts.configFile or "hub_config.json")
+    self.modules = {}
+    self.moduleOrder = {}
+    self.activeModule = nil
+    self.tabs = {}
+    self.tabButtons = {}
+    self.contentFrames = {}
+    self.gui = nil
+    self._build()
+    return self
+end
+
+function Hub:_build()
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "ModularHub"
+    gui.ResetOnSpawn = false
+    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    gui.DisplayOrder = 100
+    gui.Parent = PlayerGui
+    self.gui = gui
+
+    local root = new("Frame", {
+        Name = "Root",
+        Size = UDim2.new(0, 720, 0, 460),
+        Position = UDim2.new(0.5, -360, 0.5, -230),
+        BackgroundColor3 = Theme.bg,
+        BorderSizePixel = 0,
+        Active = true,
+    }, gui)
+    self.root = root
+    corner(root)
+    stroke(root, Theme.border)
+
+    -- título / barra de arrastar
+    local titleBar = new("Frame", {
+        Name = "TitleBar",
+        Size = UDim2.new(1, 0, 0, 44),
+        BackgroundColor3 = Theme.sidebar,
+        BorderSizePixel = 0,
+    }, root)
+    corner(titleBar, UDim.new(0, 8))
+
+    -- máscara pra arredondar só a parte de cima
+    local titleMask = new("Frame", {
+        Size = UDim2.new(1, 0, 0.5, 0),
+        Position = UDim2.new(0, 0, 0.5, 0),
+        BackgroundColor3 = Theme.sidebar,
+        BorderSizePixel = 0,
+    }, titleBar)
+
+    new("TextLabel", {
+        Size = UDim2.new(1, -120, 1, 0),
+        Position = UDim2.new(0, 16, 0, 0),
+        BackgroundTransparency = 1,
+        Text = self.title,
+        TextColor3 = Theme.text,
+        TextSize = 17,
+        Font = Enum.Font.GothamBold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, titleBar)
+
+    local closeBtn = new("TextButton", {
+        Size = UDim2.new(0, 28, 0, 28),
+        Position = UDim2.new(1, -36, 0.5, -14),
+        BackgroundColor3 = Theme.element,
+        Text = "×",
+        TextColor3 = Theme.text,
+        TextSize = 18,
+        Font = Enum.Font.GothamBold,
+        BorderSizePixel = 0,
+    }, titleBar)
+    corner(closeBtn, UDim.new(0, 6))
+    closeBtn.MouseButton1Click:Connect(function()
+        gui.Enabled = false
+    end)
+
+    -- sidebar
+    local sidebar = new("Frame", {
+        Name = "Sidebar",
+        Size = UDim2.new(0, 160, 1, -44),
+        Position = UDim2.new(0, 0, 0, 44),
+        BackgroundColor3 = Theme.sidebar,
+        BorderSizePixel = 0,
+    }, root)
+    self.sidebar = sidebar
+
+    self.sidebarLayout = Instance.new("UIListLayout")
+    self.sidebarLayout.Padding = UDim.new(0, 6)
+    self.sidebarLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    self.sidebarLayout.Parent = sidebar
+
+    new("UIPadding", {
+        PaddingTop = UDim.new(0, 8),
+        PaddingLeft = UDim.new(0, 8),
+        PaddingRight = UDim.new(0, 8),
+    }, sidebar)
+
+    -- área de conteúdo
+    local content = new("Frame", {
+        Name = "Content",
+        Size = UDim2.new(1, -160, 1, -44),
+        Position = UDim2.new(0, 160, 0, 44),
+        BackgroundColor3 = Theme.bg,
+        BorderSizePixel = 0,
+    }, root)
+    self.content = content
+
+    self:_makeDraggable(titleBar)
+    self:_makeResizable()
+end
+
+function Hub:_makeDraggable(handle)
+    local dragging, dragStart, startPos = false, nil, nil
+    handle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            dragStart = input.Position
+            startPos = self.root.Position
+        end
+    end)
+    Services.UserInputService.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local delta = input.Position - dragStart
+            self.root.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + delta.X,
+                startPos.Y.Scale, startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+    Services.UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
+end
+
+function Hub:_makeResizable()
+    local grip = new("TextButton", {
+        Size = UDim2.new(0, 16, 0, 16),
+        Position = UDim2.new(1, -20, 1, -20),
+        BackgroundTransparency = 1,
+        Text = "◢",
+        TextColor3 = Theme.textDim,
+        TextSize = 12,
+    }, self.root)
+
+    local resizing, startPos, startSize = false, nil, nil
+    grip.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            resizing = true
+            startPos = input.Position
+            startSize = self.root.Size
+        end
+    end)
+    Services.UserInputService.InputChanged:Connect(function(input)
+        if resizing and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local delta = input.Position - startPos
+            self.root.Size = UDim2.new(
+                0, math.clamp(startSize.X.Offset + delta.X, 560, 1100),
+                0, math.clamp(startSize.Y.Offset + delta.Y, 380, 780)
+            )
+        end
+    end)
+    Services.UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            resizing = false
+        end
+    end)
+end
+
+-- ============================================================
+-- REGISTRO DE MÓDULOS
+-- ============================================================
+-- module = {
+--   name = "Ferramentas",
+--   icon = "◆",
+--   build = function(container, hub) ... end,
+--   onActivate = function(hub) end,   -- opcional
+--   onDeactivate = function(hub) end, -- opcional
+-- }
+
+function Hub:register(module)
+    assert(module.name, "module.name obrigatório")
+    assert(module.build, "module.build obrigatório")
+
+    self.modules[module.name] = module
+    table.insert(self.moduleOrder, module.name)
+
+    local btn = new("TextButton", {
+        Name = "Tab_" .. module.name,
+        Size = UDim2.new(1, 0, 0, 36),
+        BackgroundColor3 = Theme.element,
+        BorderSizePixel = 0,
+        Text = "",
+        AutoButtonColor = false,
+    }, self.sidebar)
+    corner(btn, UDim.new(0, 6))
+
+    local iconLabel = new("TextLabel", {
+        Size = UDim2.new(0, 24, 1, 0),
+        Position = UDim2.new(0, 8, 0, 0),
+        BackgroundTransparency = 1,
+        Text = module.icon or "•",
+        TextColor3 = Theme.textDim,
+        TextSize = 14,
+        Font = Enum.Font.GothamBold,
+    }, btn)
+
+    local nameLabel = new("TextLabel", {
+        Size = UDim2.new(1, -36, 1, 0),
+        Position = UDim2.new(0, 32, 0, 0),
+        BackgroundTransparency = 1,
+        Text = module.name,
+        TextColor3 = Theme.text,
+        TextSize = 12,
+        Font = Enum.Font.GothamSemibold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, btn)
+
+    -- container de conteúdo da aba
+    local frame = new("Frame", {
+        Name = "Content_" .. module.name,
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        Visible = false,
+    }, self.content)
+
+    local scroll = new("ScrollingFrame", {
+        Size = UDim2.new(1, -24, 1, -24),
+        Position = UDim2.new(0, 12, 0, 12),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ScrollBarThickness = 4,
+        ScrollBarImageColor3 = Theme.accent,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+    }, frame)
+
+    local layout = Instance.new("UIListLayout")
+    layout.Padding = UDim.new(0, 8)
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Parent = scroll
+
+    frame.scroll = scroll
+
+    self.tabs[module.name] = frame
+    self.tabButtons[module.name] = { button = btn, icon = iconLabel, label = nameLabel }
+
+    btn.MouseButton1Click:Connect(function()
+        self:activate(module.name)
+    end)
+    btn.MouseEnter:Connect(function()
+        if self.activeModule ~= module.name then
+            btn.BackgroundColor3 = Theme.hover
+        end
+    end)
+    btn.MouseLeave:Connect(function()
+        if self.activeModule ~= module.name then
+            btn.BackgroundColor3 = Theme.element
+        end
+    end)
+
+    -- constrói o conteúdo uma vez
+    module.build(scroll, self)
+
+    -- ativa o primeiro
+    if #self.moduleOrder == 1 then
+        self:activate(module.name)
+    end
+end
+
+function Hub:activate(name)
+    if self.activeModule == name then return end
+
+    if self.activeModule then
+        local prev = self.modules[self.activeModule]
+        if prev and prev.onDeactivate then
+            pcall(prev.onDeactivate, self)
+        end
+        local prevTab = self.tabs[self.activeModule]
+        local prevBtn = self.tabButtons[self.activeModule]
+        if prevTab then prevTab.Visible = false end
+        if prevBtn then
+            prevBtn.button.BackgroundColor3 = Theme.element
+            prevBtn.icon.TextColor3 = Theme.textDim
+        end
+    end
+
+    self.activeModule = name
+    local tab = self.tabs[name]
+    local btnRef = self.tabButtons[name]
+    if tab then tab.Visible = true end
+    if btnRef then
+        btnRef.button.BackgroundColor3 = Theme.accentDim
+        btnRef.icon.TextColor3 = Theme.text
+    end
+
+    local module = self.modules[name]
+    if module and module.onActivate then
+        pcall(module.onActivate, self)
+    end
+end
+
+-- ============================================================
+-- COMPONENTES REUTILIZÁVEIS
+-- ============================================================
+local Components = {}
+
+function Components.toggle(parent, opts)
+    local label = opts.label or "Toggle"
+    local default = opts.default or false
+    local onChanged = opts.onChanged or function() end
+
+    local row = new("Frame", {
+        Size = UDim2.new(1, 0, 0, 40),
+        BackgroundColor3 = Theme.element,
+        BorderSizePixel = 0,
+    }, parent)
+    corner(row, UDim.new(0, 6))
+
+    new("TextLabel", {
+        Size = UDim2.new(1, -70, 1, 0),
+        Position = UDim2.new(0, 12, 0, 0),
+        BackgroundTransparency = 1,
+        Text = label,
+        TextColor3 = Theme.text,
+        TextSize = 12,
+        Font = Enum.Font.GothamSemibold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, row)
+
+    local track = new("Frame", {
+        Size = UDim2.new(0, 42, 0, 22),
+        Position = UDim2.new(1, -54, 0.5, -11),
+        BackgroundColor3 = default and Theme.accent or Theme.hover,
+        BorderSizePixel = 0,
+    }, row)
+    corner(track, UDim.new(1, 0))
+
+    local knob = new("Frame", {
+        Size = UDim2.new(0, 16, 0, 16),
+        Position = default and UDim2.new(1, -19, 0.5, -8) or UDim2.new(0, 3, 0.5, -8),
+        BackgroundColor3 = Theme.text,
+        BorderSizePixel = 0,
+    }, track)
+    corner(knob, UDim.new(1, 0))
+
+    local state = default
+    local hitbox = new("TextButton", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        Text = "",
+    }, row)
+
+    hitbox.MouseButton1Click:Connect(function()
+        state = not state
+        track.BackgroundColor3 = state and Theme.accent or Theme.hover
+        knob.Position = state and UDim2.new(1, -19, 0.5, -8) or UDim2.new(0, 3, 0.5, -8)
+        onChanged(state)
+    end)
+
+    return row, function() return state end
+end
+
+function Components.slider(parent, opts)
+    local label = opts.label or "Slider"
+    local min, max = opts.min or 0, opts.max or 100
+    local default = opts.default or min
+    local onChanged = opts.onChanged or function() end
+    local suffix = opts.suffix or ""
+
+    local row = new("Frame", {
+        Size = UDim2.new(1, 0, 0, 56),
+        BackgroundColor3 = Theme.element,
+        BorderSizePixel = 0,
+    }, parent)
+    corner(row, UDim.new(0, 6))
+
+    new("TextLabel", {
+        Size = UDim2.new(1, -100, 0, 20),
+        Position = UDim2.new(0, 12, 0, 8),
+        BackgroundTransparency = 1,
+        Text = label,
+        TextColor3 = Theme.text,
+        TextSize = 12,
+        Font = Enum.Font.GothamSemibold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, row)
+
+    local valueLabel = new("TextLabel", {
+        Size = UDim2.new(0, 80, 0, 20),
+        Position = UDim2.new(1, -92, 0, 8),
+        BackgroundTransparency = 1,
+        Text = tostring(default) .. suffix,
+        TextColor3 = Theme.accent,
+        TextSize = 12,
+        Font = Enum.Font.GothamBold,
+        TextXAlignment = Enum.TextXAlignment.Right,
+    }, row)
+
+    local bar = new("Frame", {
+        Size = UDim2.new(1, -24, 0, 5),
+        Position = UDim2.new(0, 12, 0, 38),
+        BackgroundColor3 = Theme.hover,
+        BorderSizePixel = 0,
+    }, row)
+    corner(bar, UDim.new(0, 3))
+
+    local initialPct = (default - min) / math.max(max - min, 1)
+    local fill = new("Frame", {
+        Size = UDim2.new(initialPct, 0, 1, 0),
+        BackgroundColor3 = Theme.accent,
+        BorderSizePixel = 0,
+    }, bar)
+    corner(fill, UDim.new(0, 3))
+
+    local knob = new("Frame", {
+        Size = UDim2.new(0, 14, 0, 14),
+        Position = UDim2.new(initialPct, -7, 0.5, -7),
+        BackgroundColor3 = Theme.text,
+        BorderSizePixel = 0,
+    }, bar)
+    corner(knob, UDim.new(1, 0))
+
+    local dragging = false
+    local function update(input)
+        local rel = math.clamp((input.Position.X - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
+        local value = math.floor(min + rel * (max - min) + 0.5)
+        valueLabel.Text = tostring(value) .. suffix
+        fill.Size = UDim2.new(rel, 0, 1, 0)
+        knob.Position = UDim2.new(rel, -7, 0.5, -7)
+        onChanged(value)
+    end
+
+    bar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            update(input)
+        end
+    end)
+    Services.UserInputService.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            update(input)
+        end
+    end)
+    Services.UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
+
+    return row
+end
+
+function Components.button(parent, opts)
+    local label = opts.label or "Button"
+    local onClick = opts.onClick or function() end
+
+    local btn = new("TextButton", {
+        Size = UDim2.new(1, 0, 0, 38),
+        BackgroundColor3 = opts.color or Theme.element,
+        BorderSizePixel = 0,
+        Text = label,
+        TextColor3 = Theme.text,
+        TextSize = 12,
+        Font = Enum.Font.GothamBold,
+        AutoButtonColor = false,
+    }, parent)
+    corner(btn, UDim.new(0, 6))
+
+    btn.MouseEnter:Connect(function()
+        Services.TweenService:Create(btn, TweenInfo.new(0.12), {
+            BackgroundColor3 = (opts.color or Theme.element):Lerp(Color3.new(1,1,1), 0.12)
+        }):Play()
+    end)
+    btn.MouseLeave:Connect(function()
+        Services.TweenService:Create(btn, TweenInfo.new(0.16), {
+            BackgroundColor3 = opts.color or Theme.element
+        }):Play()
+    end)
+    btn.MouseButton1Click:Connect(onClick)
+
+    return btn
+end
+
+function Components.dropdown(parent, opts)
+    local label = opts.label or "Dropdown"
+    local items = opts.items or {}
+    local default = opts.default or items[1]
+    local onChanged = opts.onChanged or function() end
+
+    local row = new("Frame", {
+        Size = UDim2.new(1, 0, 0, 40),
+        BackgroundColor3 = Theme.element,
+        BorderSizePixel = 0,
+        ClipsDescendants = false,
+        ZIndex = 2,
+    }, parent)
+    corner(row, UDim.new(0, 6))
+
+    new("TextLabel", {
+        Size = UDim2.new(0.5, 0, 1, 0),
+        Position = UDim2.new(0, 12, 0, 0),
+        BackgroundTransparency = 1,
+        Text = label,
+        TextColor3 = Theme.text,
+        TextSize = 12,
+        Font = Enum.Font.GothamSemibold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 3,
+    }, row)
+
+    local select = new("TextButton", {
+        Size = UDim2.new(0, 120, 0, 26),
+        Position = UDim2.new(1, -132, 0.5, -13),
+        BackgroundColor3 = Theme.bg,
+        BorderSizePixel = 0,
+        Text = tostring(default),
+        TextColor3 = Theme.text,
+        TextSize = 11,
+        Font = Enum.Font.GothamSemibold,
+        ZIndex = 4,
+    }, row)
+    corner(select, UDim.new(0, 4))
+
+    local popup = new("ScrollingFrame", {
+        Size = UDim2.new(0, 160, 0, math.min(#items * 30, 180)),
+        BackgroundColor3 = Theme.panel,
+        BorderSizePixel = 0,
+        ScrollBarThickness = 4,
+        CanvasSize = UDim2.new(0, 0, 0, #items * 30),
+        Visible = false,
+        ZIndex = 100,
+    }, self.gui)
+    corner(popup)
+
+    for i, item in ipairs(items) do
+        local opt = new("TextButton", {
+            Size = UDim2.new(1, -8, 0, 26),
+            Position = UDim2.new(0, 4, 0, (i - 1) * 30 + 2),
+            BackgroundColor3 = Theme.element,
+            BorderSizePixel = 0,
+            Text = tostring(item),
+            TextColor3 = Theme.text,
+            TextSize = 11,
+            Font = Enum.Font.GothamSemibold,
+            ZIndex = 101,
+        }, popup)
+        corner(opt, UDim.new(0, 4))
+        opt.MouseButton1Click:Connect(function()
+            select.Text = tostring(item)
+            popup.Visible = false
+            onChanged(item)
+        end)
+    end
+
+    select.MouseButton1Click:Connect(function()
+        popup.Visible = not popup.Visible
+        if popup.Visible then
+            local pos = select.AbsolutePosition
+            popup.Position = UDim2.fromOffset(pos.X - 40, pos.Y + select.AbsoluteSize.Y + 4)
+        end
+    end)
+
+    return row
+end
+
+function Components.label(parent, text, opts)
+    opts = opts or {}
+    local lbl = new("TextLabel", {
+        Size = UDim2.new(1, 0, 0, opts.height or 24),
+        BackgroundTransparency = 1,
+        Text = text,
+        TextColor3 = opts.color or Theme.textDim,
+        TextSize = opts.size or 11,
+        Font = opts.bold and Enum.Font.GothamBold or Enum.Font.Gotham,
+        TextWrapped = true,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, parent)
+    return lbl
+end
+
+-- ============================================================
+-- EXEMPLO DE USO
+-- ============================================================
+--[[
+
+local hub = Hub.new({ title = "Meu Hub", configFile = "meuhub.json" })
+
+hub:register({
+    name = "Geral",
+    icon = "◈",
+    build = function(container, h)
+        Components.toggle(container, {
+            label = "Ativar recurso",
+            default = h.store:get("geral_on", false),
+            onChanged = function(v) h.store:set("geral_on", v) end,
+        })
+        Components.slider(container, {
+            label = "Intensidade",
+            min = 0, max = 100,
+            default = h.store:get("intensidade", 50),
+            onChanged = function(v) h.store:set("intensidade", v) end,
+        })
+        Components.dropdown(container, {
+            label = "Modo",
+            items = { "A", "B", "C" },
+            default = h.store:get("modo", "A"),
+            onChanged = function(v) h.store:set("modo", v) end,
+        })
+        Components.button(container, {
+            label = "Executar ação",
+            onClick = function() print("ação!") end,
+        })
+    end,
+})
+
+hub:register({
+    name = "Avançado",
+    icon = "◇",
+    build = function(container, h)
+        Components.label(container, "Configurações avançadas aqui.")
+        Components.button(container, {
+            label = "Resetar config",
+            color = Theme.danger,
+            onClick = function()
+                h.store:reset()
+                print("config resetado")
+            end,
+        })
+    end,
+})
+
+-- hotkey pra reabrir
+Services.UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    if input.KeyCode == Enum.KeyCode.Insert then
+        hub.gui.Enabled = not hub.gui.Enabled
     end
 end)
-UserInputService.InputEnded:Connect(function(Input, P)
-    if P then return end
-    if Input.KeyCode == Settings.AimKey then
-        AimbotActive = false
-    end
-end)
 
-ToggleBtn.MouseButton1Click:Connect(function()
-    Settings.Enabled = not Settings.Enabled
-    ToggleBtn.Text = Settings.Enabled and "ESP: ON" or "ESP: OFF"
-    ToggleBtn.BackgroundColor3 = Settings.Enabled and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(150, 0, 0)
-    if not Settings.Enabled then
-        for _, o in pairs(ESPObjects) do
-            if o.Highlight then o.Highlight:Destroy() end
-            if o.Box then o.Box:Remove() end
-            if o.Tracer then o.Tracer:Remove() end
-            if o.Billboard then o.Billboard:Destroy() end
-        end
-        table.clear(ESPObjects)
-    end
-end)
+--]]
 
--- =============================================
--- LOOP PRINCIPAL
--- =============================================
-CreateFOVCircle()
-local lastScan = 0
-
-RunService.RenderStepped:Connect(function()
-    -- Atualizar FOV visual
-    if FOVCircle and Settings.ShowFOVCircle then
-        FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-        FOVCircle.Visible = Settings.Enabled
-    end
-
-    -- Aimbot rodando
-    if AimbotActive and Settings.AimEnabled and Settings.Enabled then
-        local Alvo = GetClosestAimTarget()
-        AimAt(Alvo)
-    end
-
-    if not Settings.Enabled then return end
-
-    -- Atualizar ESP
-    for Target, Obj in pairs(ESPObjects) do
-        if not Target.Parent or not Target:FindFirstChild("Humanoid") or Target.Humanoid.Health <= 0 then
-            RemoveESP(Target)
-            continue
-        end
-        local Dist = 9999
-        local LRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-        if LRoot and Obj.RootPart then
-            Dist = (LRoot.Position - Obj.RootPart.Position).Magnitude
-        end
-        if Dist > Settings.MaxDistance then
-            Obj.Box.Visible = false
-            Obj.Tracer.Visible = false
-            Obj.NameLabel.Visible = false
-            Obj.Highlight.Enabled = false
-            continue
-        else
-            Obj.Highlight.Enabled = Settings.ShowHighlight
-            Obj.NameLabel.Visible = Settings.ShowName
-        end
-        local Pos, OnScreen = Camera:WorldToViewportPoint(Obj.RootPart.Position)
-        if OnScreen then
-            local Dm = (Camera.CFrame.Position - Obj.RootPart.Position).Magnitude
-            local Sz = Target:GetExtentsSize()
-            local Bh = Sz.Y * (Camera.ViewportSize.Y / Dm) * 10
-            local Bw = Bh * 0.6
-            if Settings.ShowBox then
-                Obj.Box.Size = Vector2.new(Bw, Bh)
-                Obj.Box.Position = Vector2.new(Pos.X - Bw/2, Pos.Y - Bh/2)
-                Obj.Box.Visible = true
-            else
-                Obj.Box.Visible = false
-            end
-            if Settings.ShowTracer then
-                Obj.Tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
-                Obj.Tracer.To = Vector2.new(Pos.X, Pos.Y)
-                Obj.Tracer.Visible = true
-            else
-                Obj.Tracer.Visible = false
-            end
-        else
-            Obj.Box.Visible = false
-            Obj.Tracer.Visible = false
-        end
-    end
-
-    -- Escanear jogadores
-    local now = os.clock()
-    if now - lastScan > 0.5 then
-        lastScan = now
-        for _, Plr in ipairs(Players:GetPlayers()) do
-            if Plr ~= LocalPlayer and Plr.Character then
-                if IsEnemy(Plr.Character) then
-                    AddESP(Plr.Character)
-                else
-                    RemoveESP(Plr.Character)
-                end
-            end
-        end
-    end
-end)
+return { Hub = Hub, Components = Components, Theme = Theme, Store = Store }
